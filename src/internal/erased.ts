@@ -59,3 +59,27 @@ export const extractOutput = (
   if (!context.mapUnsafe.has(description.exportKey)) return Option.none();
   return Context.getOption(context, service);
 };
+
+/**
+ * Erases the caller context only where the heterogeneous runtime captures it.
+ * Context is immutable; this changes no value or ownership at runtime.
+ */
+export const eraseCapturedContext = (context: Context.Context<never>): Context.Context<unknown> =>
+  context as Context.Context<unknown>;
+
+/**
+ * Recovers the callback's service shape after validating the publication key.
+ * The registry stores unknown values because different service shapes coexist.
+ */
+export const recoverService = <S>(
+  key: Context.Key<unknown, S>,
+  publicationKey: string,
+  value: unknown,
+): S => {
+  if (key.key !== publicationKey) {
+    throw new TypeError(
+      `Publication key ${publicationKey} does not match requested service ${key.key}`,
+    );
+  }
+  return value as S;
+};

@@ -26,3 +26,11 @@ Replacement выполняется строго stop-before-start. Не допу
 - Ошибка release видна и блокирует автоматический restart: внешний ресурс мог остаться занят.
 - Некоооперативный acquisition/callback/finalizer может удерживать Stopping и shutdown. Timeout ожидания не разрешает закрыть provider под живым consumer.
 - `use` закрепляет одно поколение, не повторяет бизнес-команды и сохраняет среду вызывающего Effect. Запрет service escape — договор пользователя, не гарантия линейных типов TypeScript.
+
+## Уточнения после исполняемой проверки Effect RC
+
+`shutdown` выполняет непрерываемый ordered drain. Отмена одного ожидающего caller не должна закрывать execution Scope посреди освобождения графа. Controller подтверждает все принятые shutdown-запросы и выходит; только затем закрывается execution Scope. Следствие: timeout вокруг shutdown не обещает немедленного возврата. Для отменяемого наблюдения предназначены `awaitState`/`awaitIdle`; snapshot читается и во время Closing.
+
+Отчёт исполнителя — часть управления ресурсами, не отменяемая пользовательская работа. В build/gate worker interruptible только сам I/O; захват Exit и enqueue completion защищены маской. Иначе interruption между выходом I/O и отправкой completion оставляет вечный tracked worker.
+
+Cause Effect RC не размечает происхождение каждого defect внутри Layer. Комбинации Die с Fail/Interrupt либо несколько Die при build консервативно считаются потенциальной ошибкой rollback. Узел сохраняет Cause и release-quarantine, команды enable/replace/retry не снимают её. Цена безопасного решения: составная acquisition-only ошибка тоже может потребовать нового runtime вместо retry. Мы не пытаемся распознать происхождение по тексту исключений или приватному AST Layer.
