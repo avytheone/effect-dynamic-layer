@@ -1,134 +1,134 @@
-# Статус experimental 0.1.0
+# Состояние экспериментальной версии 0.1.0
 
-Библиотека реализована и проверена локально, включая одобренный clean cutover управления на `Context` services и `LifecycleState`. Публикация npm, deployment и production-интеграции не выполнялись. Исходный договор — `HANDOFF-dynamic-layer.md`; явные уточнения владельца: **Effect RC и Bun** вместо baseline v3/pnpm/Vitest.
+Библиотека реализована и проверена локально. В том числе завершён одобренный прямой переход от строковых идентификаторов узлов к управлению через сервисы `Context` и `LifecycleState`. Пакет не публиковался в npm, не развёртывался и не проверялся в промышленной интеграции. Исходные требования зафиксированы в `HANDOFF-dynamic-layer.md`; владелец отдельно уточнил, что вместо исходной основы Effect 3.x, pnpm и Vitest следует использовать **Effect RC и Bun**.
 
 ## Точные версии
 
 | Компонент | Версия |
 |---|---|
-| Effect: peer и dev | `4.0.0-rc.115` |
-| Bun: package manager, runtime тестов, bundler | `1.4.2` |
+| Effect: предоставляется приложением (`peerDependencies`) и используется при разработке (`devDependencies`) | `4.0.0-rc.115` |
+| Bun: диспетчер пакетов, среда выполнения тестов и сборщик | `1.4.2` |
 | TypeScript | `7.0.2` |
 | Biome | `2.5.13` |
 | Lefthook, проектная зависимость | `2.1.12` |
-| @types/bun | `1.4.2` |
-| Доступный Node, не основной проверенный runtime | `24.15.0` |
+| `@types/bun` | `1.4.2` |
+| Доступная версия Node, которая не была основной проверенной средой выполнения | `24.15.0` |
 
-Effect не встроен в bundle. Peer-диапазон точно ограничен проверенной RC. Проверены npm dist-tags и опубликованный список версий; результаты compatibility spike — в [compatibility.md](compatibility.md).
+Effect не включён в собранный пакет. Диапазон `peerDependencies` ограничен ровно проверенной предварительной версией. Метки npm и список опубликованных версий проверены; результаты отдельной проверки совместимости приведены в [compatibility.md](compatibility.md).
 
-## Итоговые команды и фактические результаты
+## Выполненные команды и полученные результаты
 
-После чистого перехода со строковых node ids на service Tags все проверки выполнены повторно. Предыдущая baseline: 63 теста / 208 assertions; текущий результат включает пять дополнительных поведенческих регрессий управления по Tag.
+После полного перехода от строковых идентификаторов узлов к тегам сервисов все проверки запустили заново. До перехода исходный результат составлял 63 теста и 208 проверок утверждений. Текущий результат включает ещё пять поведенческих регрессионных тестов управления по тегу.
 
 | Команда | Результат |
 |---|---|
-| `bun install --frozen-lockfile` | Успешно; 12 установок / 47 пакетов, lockfile без изменений, hooks установлены |
-| `bun test` | **68 passed, 0 failed, 231 assertions, 11 файлов**, 299 ms |
-| `bun run typecheck` | Успешно: core, runtime-тесты, examples и package-check script |
-| `bun run test:types` | Успешно: положительные и отрицательные generic-контракты действительно проверены TypeScript |
-| `bun run lint` | Успешно: Biome проверил 29 файлов, без исправлений |
-| `bun run build` | Успешно: Bun ESM bundle, 8 собственных модулей, 52.42 KB; declarations выпущены TypeScript |
-| `bun run test:package` | Успешно: внешний consumer реального tarball импортирует `LifecycleState`, выполняет Tag-based Active → disable → Disabled → enable → Active; strict typecheck и отрицательные внутренние импорты проходят |
-| `bun run examples` | Все три примера завершились: basic, effect-factory, failure-and-retry |
+| `bun install --frozen-lockfile` | Выполнена успешно: 12 установок, 47 пакетов; файл блокировки не изменился, перехватчики установлены |
+| `bun test` | **68 тестов прошли, 0 ошибок, 231 проверка утверждений, 11 файлов**, 299 мс |
+| `bun run typecheck` | Выполнена успешно для ядра, тестов механизма управления, примеров и сценария проверки пакета |
+| `bun run test:types` | Выполнена успешно: TypeScript действительно проверил положительные и отрицательные контракты обобщённых типов |
+| `bun run lint` | Выполнена успешно: Biome проверил 29 файлов и не внёс исправлений |
+| `bun run build` | Выполнена успешно: Bun собрал пакет ESM из 8 собственных модулей размером 52,42 КБ; TypeScript выпустил файлы объявлений |
+| `bun run test:package` | Выполнена успешно: отдельное приложение установило настоящий архив пакета, импортировало `LifecycleState` и выполнило последовательность на основе тегов Active → disable → Disabled → enable → Active; строгая проверка типов и отрицательные проверки внутренних импортов прошли |
+| `bun run examples` | Все три примера завершились успешно: basic, effect-factory и failure-and-retry |
 
-Сборка: `--target browser --format esm --external effect`. Это проверенный способ получения ESM без platform API в core, **не заявление о browser runtime compatibility**.
+Сборка выполнялась с параметрами `--target browser --format esm --external effect`. Они проверенно создают ESM без платформенных API в ядре, но **не доказывают работу библиотеки в браузере**.
 
-Дополнительные регрессии в `test/tag-control.test.ts` проверяют несовпадающие node id и service key, управление Pending/Disabled, различие отсутствующей и retiring-регистрации, атомарное отклонение несовместимой замены и lifetime ожидания при replace/unregister/re-register. `test-d/api.test-d.ts` отвергает строковые targets для всех шести операций, неизвестное состояние и несовместимый replacement. Строковые перегрузки, `UnknownNode` и `StateTag` удалены; `id` остаётся в описаниях и диагностике.
+Дополнительные регрессионные сценарии в `test/tag-control.test.ts` проверяют разные значения идентификатора узла и ключа сервиса, управление регистрациями в состояниях Pending и Disabled, различие между отсутствующей и завершающейся регистрацией, атомарный отказ от несовместимой замены и срок жизни ожидания при последовательности replace/unregister/re-register. Файл `test-d/api.test-d.ts` подтверждает, что все шесть операций отвергают строковые цели, а также отвергает неизвестное состояние и несовместимую замену. Строковые перегрузки, `UnknownNode` и `StateTag` удалены. Поле `id` сохранено в описаниях и диагностике.
 
-## Этапы реализации
+## Что было реализовано по этапам
 
-| Этап | Итог |
+| Этап | Результат |
 |---|---|
-| Tooling / Git | Отдельный репозиторий, Bun lockfile, strict TypeScript, Biome, Lefthook, Bun CI |
-| 0 — compatibility | 10 исполняемых проверок Scope/MemoMap, cleanup, fibers, SubscriptionRef, Context.Reference, ScopedRef и LayerMap |
-| 1 — модель / planner | Immutable Requirement AST, opaque описания, проверка типов и атомарная валидация DAG |
-| 2 — acquisition / teardown | Один controller, защищённый completion protocol, generation scopes, borrowed providers, ordered cleanup |
-| 3 — граф / гонки | replace/unregister/retry, stale publication guards, retiring reservation, release quarantine |
-| 4 — gate / use | Регистрационные watchers, atomic call admission, caller context, scoped children, отмена и диагностика |
-| 5 — поставка | Exports, declarations, внешний tarball consumer, три examples, документация и release checklist |
+| Инструменты и Git | Отдельный репозиторий, файл блокировки Bun, строгий TypeScript, Biome, Lefthook и непрерывная интеграция на Bun |
+| 0 — совместимость | 10 исполняемых проверок для Scope/MemoMap, освобождения ресурсов, дочерних задач Effect, SubscriptionRef, Context.Reference, ScopedRef и LayerMap |
+| 1 — модель и планировщик | Неизменяемое дерево требований Requirement, непрозрачные описания, проверка типов и атомарная проверка ориентированного ациклического графа |
+| 2 — создание и завершение | Один управляющий цикл, защищённый протокол завершения, отдельный Scope для ресурсов каждого поколения, заимствованные сервисы-зависимости и упорядоченное освобождение ресурсов |
+| 3 — граф и гонки | replace/unregister/retry, защита от публикации устаревшего экземпляра, резервирование завершающейся регистрации и изоляция после ошибки освобождения |
+| 4 — условие запуска и use | Наблюдатели за условиями регистрации, атомарный допуск вызовов, контекст вызывающей стороны, дочерние задачи с управляемым временем жизни, отмена и диагностика |
+| 5 — поставка | Экспорты, объявления типов, проверка отдельным приложением-потребителем архива пакета, три примера, документация и контрольный список выпуска |
 
-## Матрица обязательных T01–T40
+## Матрица обязательных сценариев T01–T40
 
-Файлы указаны относительно корня репозитория. Сценарии могут иметь несколько доказательств; номера в названиях тестов позволяют найти конкретный случай. Type-tests не входят в число 68 runtime-тестов.
+Пути к файлам указаны относительно корня репозитория. У одного сценария может быть несколько подтверждений; номер в названии теста помогает найти нужный случай. Проверки типов не входят в число 68 тестов среды выполнения.
 
-| ID | Проверенное поведение | Доказательство |
+| ID | Проверенное поведение | Подтверждение |
 |---|---|---|
-| T01 | Простой register → Active, release ровно один раз | `test/lifecycle.test.ts` |
-| T02 | Consumer без provider остаётся Pending, acquisition не выполняется | `test/lifecycle.test.ts` |
-| T03 | Provider запускает зависимых consumers в нужном порядке | `test/lifecycle.test.ts`, `examples/basic.ts` |
-| T04 | После disable ACK вся цепочка недоступна для use до окончания удержанного consumer finalizer; release от view к provider | `test/interop.test.ts`, `test/lifecycle.test.ts` |
-| T05 | Повторный enable создаёт новые ids и новые зависимости | `test/lifecycle.test.ts` |
-| T06 | Replacement пересобирает consumers, независимая ветка сохраняется | `test/replacement.test.ts` |
-| T07 | Настоящий diamond с joining consumer: общий provider один, освобождается последним | `test/lifecycle.test.ts` |
-| T08 | Частичный acquisition rollback освобождает ресурсы, публикации нет | `test/lifecycle.test.ts` |
-| T09 | Typed failure и defect различимы в Cause и safe summary | `test/errors.test.ts` |
-| T10 | Snapshot/duplicate gate/независимые команды не вызывают retry loop | `test/errors.test.ts` |
-| T11 | Явный retry и новое поколение нужного provider разрешают новую попытку; посторонняя ветка — нет | `test/errors.test.ts`, `test/interop.test.ts` |
-| T12 | False gate запрещает acquisition, true открывает запуск | `test/gates.test.ts` |
-| T13 | Duplicate true не перезапускает; false → true создаёт новое поколение | `test/gates.test.ts` |
-| T14 | Gate watcher переживает disable, очищается при unregister/shutdown | `test/gates.test.ts`, `test/shutdown.test.ts` |
-| T15 | Изменение при подключении gate observer не теряется | `test/gates.test.ts`, `test/compatibility.test.ts` |
-| T16 | Удержанный build после disable не публикует старый сервис | `test/replacement.test.ts` |
-| T17 | Замена provider во время consumer build оставляет недоступной старую публикацию и запускает новую с новым входом | `test/replacement.test.ts` |
-| T18 | Gate cycle инвалидирует build, даже если последнее значение снова true | `test/gates.test.ts` |
-| T19 | Быстрые replace/disable/enable сходятся к последнему рецепту | `test/replacement.test.ts` |
-| T20 | Controller принимает команды и snapshot при незавершённом acquisition | `test/lifecycle.test.ts` |
-| T21 | Provider физически жив во время consumer finalizer | `test/lifecycle.test.ts`, `test/interop.test.ts` |
-| T22 | Коллизии и циклы отклоняются атомарно; текущий граф не портится | `test/graph.test.ts`, `test/errors.test.ts` |
-| T23 | Retiring id/key зарезервированы до cleanup, затем допускают reuse | `test/replacement.test.ts` |
-| T24 | enable/disable/shutdown идемпотентны | `test/shutdown.test.ts` |
-| T25 | Один Layer object получает новый dependency Context и fresh MemoMap | `test/replacement.test.ts`, `test/compatibility.test.ts` |
-| T26 | Повторный sublayer внутри одного runtime build приобретается/освобождается один раз | `test/interop.test.ts` |
-| T27 | Недоступный use не вызывает callback | `test/use.test.ts` |
-| T28 | Use при replacement привязан к одному поколению, не переживает его release | `test/use.test.ts` |
-| T29 | Публичный snapshot подтверждает живой admission до отмены; tracking и scoped children очищаются. Дополнительно 32 low-quantum cancellation-попытки | `test/ownership-regression.test.ts`, `test/use.test.ts` |
-| T30 | Revocation прерывает call, ждёт cleanup и не повторяет бизнес-callback | `test/use.test.ts` |
-| T31 | Сохранены caller Service/Context.Reference и дополнительный type requirement | `test/use.test.ts`, `test-d/api.test-d.ts`, `test/compatibility.test.ts` |
-| T32 | Scoped worker сервиса жив после acquisition и останавливается до provider finalizer; children callback тоже не утекают | `test/ownership-regression.test.ts`, `test/use.test.ts` |
-| T33 | Shutdown при Starting, с gate, конкурентными requests и отменой caller; controller не теряет completion | `test/shutdown.test.ts`, `test/ownership-regression.test.ts` |
-| T34 | Release defect и stale rollback defect видны, quarantine не исчезает при командах, ложного Closed нет | `test/errors.test.ts`, `test/ownership-regression.test.ts` |
-| T35 | Некооперативный cleanup удерживает Stopping до ручного release барьера | `test/errors.test.ts` |
-| T36 | Два runtime с одинаковыми ids/tags независимы | `test/replacement.test.ts` |
-| T37 | Missing requirement, неверные acquire/output и unknown widening отвергаются компилятором | `test-d/api.test-d.ts` |
-| T38 | Внутренний Layer.provide и runtime-owned Scope не требуют лишних dependencies/casts | `test-d/api.test-d.ts`, examples |
-| T39 | 100 полных циклов register/replace/disable/enable/unregister: 300 acquisitions = 300 releases; после shutdown tracked counters равны нулю | `test/shutdown.test.ts` |
-| T40 | Waits отменяемы, конкурентно переиспользуемы, завершаются ошибкой после удаления/закрытия | `test/shutdown.test.ts` |
+| T01 | Простая регистрация приводит к Active; ресурс освобождается ровно один раз | `test/lifecycle.test.ts` |
+| T02 | Зависимый сервис без поставщика остаётся в Pending; создание не начинается | `test/lifecycle.test.ts` |
+| T03 | Появление поставщика запускает зависимые сервисы в правильном порядке | `test/lifecycle.test.ts`, `examples/basic.ts` |
+| T04 | После подтверждения disable вся цепочка недоступна для use до завершения удержанного финализатора зависимого сервиса; ресурсы освобождаются от представления к поставщику | `test/interop.test.ts`, `test/lifecycle.test.ts` |
+| T05 | Повторный enable создаёт новые идентификаторы и новые зависимости | `test/lifecycle.test.ts` |
+| T06 | Замена пересобирает зависимые сервисы, не затрагивая независимую ветку | `test/replacement.test.ts` |
+| T07 | В настоящем ромбовидном графе с объединяющим зависимым сервисом общий поставщик создаётся один раз и освобождается последним | `test/lifecycle.test.ts` |
+| T08 | Откат после частичного создания освобождает ресурсы и ничего не публикует | `test/lifecycle.test.ts` |
+| T09 | Типизированная ошибка и дефект различимы в Cause и в безопасном кратком описании | `test/errors.test.ts` |
+| T10 | Снимок состояния, повторное значение условия запуска и команды для независимых сервисов не запускают бесконечные повторные попытки | `test/errors.test.ts` |
+| T11 | Явный retry и новое поколение нужного поставщика разрешают следующую попытку; изменение посторонней ветки её не разрешает | `test/errors.test.ts`, `test/interop.test.ts` |
+| T12 | Ложное условие запрещает создание, истинное разрешает запуск | `test/gates.test.ts` |
+| T13 | Повторное значение true не перезапускает сервис; переход false → true создаёт новое поколение | `test/gates.test.ts` |
+| T14 | Наблюдатель за условием запуска продолжает работать после disable и очищается при unregister или shutdown | `test/gates.test.ts`, `test/shutdown.test.ts` |
+| T15 | Изменение во время подключения наблюдателя за условием запуска не теряется | `test/gates.test.ts`, `test/compatibility.test.ts` |
+| T16 | Задержанная сборка после disable не публикует устаревший сервис | `test/replacement.test.ts` |
+| T17 | Замена поставщика во время сборки зависимого сервиса не допускает публикацию старого экземпляра и запускает новый с новым входным значением | `test/replacement.test.ts` |
+| T18 | Цикл изменения условия запуска делает текущую сборку устаревшей, даже если последнее значение снова равно true | `test/gates.test.ts` |
+| T19 | Быстрая последовательность replace/disable/enable сходится к последнему описанию | `test/replacement.test.ts` |
+| T20 | Управляющий цикл принимает команды и выдаёт снимок состояния, пока создание ещё не завершилось | `test/lifecycle.test.ts` |
+| T21 | Поставщик физически остаётся жив во время финализатора зависимого сервиса | `test/lifecycle.test.ts`, `test/interop.test.ts` |
+| T22 | Коллизии и циклы отклоняются атомарно, не повреждая работающий граф | `test/graph.test.ts`, `test/errors.test.ts` |
+| T23 | Идентификатор и ключ завершающейся регистрации зарезервированы до окончания очистки, после чего их можно использовать снова | `test/replacement.test.ts` |
+| T24 | enable, disable и shutdown идемпотентны | `test/shutdown.test.ts` |
+| T25 | Один объект Layer получает новый контекст зависимостей и свежий MemoMap | `test/replacement.test.ts`, `test/compatibility.test.ts` |
+| T26 | Повторяющийся вложенный слой в одной сборке механизма управления создаётся и освобождается один раз | `test/interop.test.ts` |
+| T27 | Недоступный use не вызывает переданную функцию | `test/use.test.ts` |
+| T28 | Вызов use во время замены привязан к одному поколению и не переживает освобождение его ресурсов | `test/use.test.ts` |
+| T29 | Публичный снимок состояния показывает допущенный вызов до его отмены; учёт вызовов и дочерние задачи с управляемым временем жизни очищаются. Дополнительно выполнены 32 попытки отмены с малым квантом планировщика | `test/ownership-regression.test.ts`, `test/use.test.ts` |
+| T30 | Отзыв доступа прерывает вызов, ждёт завершения его очистки и не повторяет прикладную переданную функцию | `test/use.test.ts` |
+| T31 | Сохраняются Service и Context.Reference вызывающей стороны, а также дополнительное требование типа | `test/use.test.ts`, `test-d/api.test-d.ts`, `test/compatibility.test.ts` |
+| T32 | Фоновая задача сервиса с временем жизни, ограниченным Scope, живёт после создания и останавливается до финализатора поставщика; дочерние задачи переданной функции также не утекают | `test/ownership-regression.test.ts`, `test/use.test.ts` |
+| T33 | Shutdown корректно работает во время Starting, при наличии условия запуска, конкурентных запросах и отмене вызывающей стороны; управляющий цикл не теряет сообщение о завершении | `test/shutdown.test.ts`, `test/ownership-regression.test.ts` |
+| T34 | Дефект освобождения и дефект отката устаревшего экземпляра остаются видимыми; изоляция не исчезает после команд, ложное состояние Closed не появляется | `test/errors.test.ts`, `test/ownership-regression.test.ts` |
+| T35 | Очистка, не реагирующая на отмену, удерживает состояние Stopping до ручного освобождения барьера | `test/errors.test.ts` |
+| T36 | Два экземпляра механизма управления с одинаковыми идентификаторами и тегами независимы | `test/replacement.test.ts` |
+| T37 | Компилятор отвергает отсутствующее требование, неверные типы создания или результата и необоснованное расширение до unknown | `test-d/api.test-d.ts` |
+| T38 | Внутренние Layer.provide и Scope, которыми владеет механизм управления, не требуют лишних зависимостей или приведений типов | `test-d/api.test-d.ts`, примеры |
+| T39 | В 100 полных циклах register/replace/disable/enable/unregister число созданий и освобождений совпадает: 300 и 300; после shutdown все учитываемые счётчики равны нулю | `test/shutdown.test.ts` |
+| T40 | Ожидания можно отменять и безопасно использовать конкурентно; после удаления регистрации или закрытия механизма управления они завершаются ошибкой | `test/shutdown.test.ts` |
 
-Дополнительные регрессии: синхронный throw callback не оставляет admission; defect finalizer call не теряет tracking; отсутствующий Context.Reference export не подменяется default; concurrent public request admission проверен с малым scheduler quantum.
+Дополнительные регрессионные сценарии подтверждают, что синхронное исключение из переданной функции не оставляет допущенный вызов в учёте; дефект финализатора вызова не приводит к потере учёта; отсутствующий экспорт `Context.Reference` не подменяется значением по умолчанию; конкурентный допуск публичных запросов проверен с малым квантом планировщика.
 
-## Найденные и устранённые проблемы
+## Обнаруженные и исправленные проблемы
 
-- Прерывание между завершением user I/O и отправкой build/gate completion оставляло вечный tracked worker. Исправлен ownership protocol: только I/O interruptible, Exit capture и enqueue completion защищены.
-- Закрытие execution Scope до выхода controller могло прервать подтверждение второго shutdown caller. Теперь сначала заканчиваются все подтверждения и controller, затем execution Scope.
-- Проверка состояния перед асинхронной подготовкой request оставляла pre-enqueue race с shutdown. Финальная проверка состояния и `Queue.offerUnsafe` выполняются одним синхронным шагом после создания reply.
-- Scope финализатора call, synchronous callback throw, reused wait effects и release-quarantine получили отдельные регрессии и корректные cleanup paths.
-- `LayerMap` с default zero idle TTL не кеширует между неперекрывающимися закрытыми leases; compatibility test исправлен на проверку настоящего lease lifetime.
-- Scheduler quantum 1 в выбранной RC не обеспечивал прогресс даже простому Effect без библиотеки. Adversarial-тесты используют проверенный quantum 16; временный baseline probe удалён.
+- Прерывание между завершением пользовательского ввода-вывода и отправкой сообщения о завершении сборки или условия запуска оставляло навсегда учтённую рабочую задачу. Протокол владения исправлен: прерываемым остаётся только ввод-вывод, а захват Exit и постановка сообщения о завершении защищены от прерывания.
+- Закрытие области выполнения до выхода управляющего цикла могло прервать подтверждение для второго вызывающего shutdown. Теперь сначала управляющий цикл отправляет все подтверждения и завершается, и только затем закрывается область выполнения.
+- Проверка состояния до асинхронной подготовки запроса оставляла гонку с shutdown перед постановкой запроса в очередь. Теперь после создания ответа окончательная проверка состояния и `Queue.offerUnsafe` выполняются одним синхронным шагом.
+- Для области финализатора вызова, синхронного исключения из переданной функции, повторно используемых эффектов ожидания и изоляции после ошибки освобождения добавлены отдельные регрессионные сценарии и правильные пути очистки.
+- `LayerMap` с нулевым значением `idleTimeToLive` по умолчанию не сохраняет значение между неперекрывающимися уже закрытыми владениями. Проверка совместимости исправлена так, чтобы проверять настоящий срок жизни владения.
+- Квант планировщика 1 в выбранной предварительной версии не обеспечивал продвижение даже простого Effect без этой библиотеки. Проверки неблагоприятного планирования используют подтверждённый квант 16; временная исходная проба удалена.
 
-Финальное source-only lifecycle review не оставило существенных замечаний. Это дополняет, но не заменяет исполняемые тесты.
+Заключительный разбор исходного кода, посвящённый только жизненному циклу, не выявил существенных замечаний. Он дополняет исполняемые тесты, но не заменяет их.
 
-## Уточнения API и честные ограничения
+## Уточнения API и известные ограничения
 
-- Effect RC: `Context.Service`, scoped `Layer.effect`, `Layer.unwrap`, fiber-local `Context.Reference`; v3 `Context.Tag` / `Layer.scoped` / `Layer.unwrapEffect` не смешиваются с RC API.
-- Одобрен clean cutover: `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` принимают `Context` service, без строковых overloads и aliases. `LifecycleState` экспортируется для ожиданий; node `id` остаётся диагностическим metadata snapshots.
-- `shutdown` — непрерываемый ordered drain. Timeout/cancellation не отрывают cleanup и не обещают немедленного возврата. `awaitState`/`awaitIdle` отменяемы, snapshot доступен в Closing и terminal state.
-- Составной Cause с Die+Fail/Interrupt или несколькими Die консервативно считается потенциальной ошибкой rollback и блокирует restart. Это безопасно, но составная acquisition-only ошибка тоже иногда требует нового runtime. См. ADR 0002.
-- `retry` вне non-quarantined Failed — no-op. `awaitIdle` также ждёт managed calls, но не фоновые scoped workers сервиса или gate watchers.
-- Статический Context фиксируется при make; произвольные Layer FiberRef/runtime-патчи downstream не обещаются.
-- TypeScript не запрещает все service escapes и неучтённые Promise. Некооперативный user code может удерживать Stopping/shutdown.
-- Mailbox lossless и без сложного backpressure; snapshots — состояние, не audit log. Raw Cause может содержать чувствительные данные, для логов есть `safeSummary`.
-- Не проверены browser runtime, другие Effect RC/major, отдельный Node execution path и удалённый GitHub Actions run. CI workflow настроен, локально его команды выполнены.
-- Нет сети, БД, UI, HMR, plugin loader, multi-provider, distributed leases и zero-downtime replacement.
+- В выбранной предварительной версии Effect используются `Context.Service`, `Layer.effect` с управляемым временем жизни ресурсов, `Layer.unwrap` и локальный для дочерней задачи `Context.Reference`. API Effect 3 — `Context.Tag`, `Layer.scoped` и `Layer.unwrapEffect` — с этим API не смешивается.
+- После одобренного прямого перехода методы `enable`, `disable`, `retry`, `unregister`, `replace` и `awaitState` принимают сервис `Context`; строковых перегрузок и псевдонимов нет. Для ожиданий экспортируется `LifecycleState`; поле `id` узла остаётся диагностическими метаданными снимков состояния.
+- `shutdown` выполняет упорядоченное и непрерываемое завершение. Таймаут или отмена не отделяют очистку от завершения и не обещают немедленного возврата. `awaitState` и `awaitIdle` можно отменять; снимок состояния доступен во время Closing и в конечном состоянии.
+- Составной Cause с Die+Fail/Interrupt или несколькими Die консервативно считается возможной ошибкой отката и запрещает перезапуск. Это безопасное поведение, но из-за него даже составная ошибка только на этапе создания иногда требует нового экземпляра механизма управления. См. ADR 0002.
+- `retry` ничего не делает, если сервис не находится в состоянии Failed без изоляции. `awaitIdle` ждёт также завершения управляемых вызовов, но не фоновых задач сервиса, ограниченных Scope, и не наблюдателей за условиями запуска.
+- Статический Context фиксируется при make. Произвольное распространение изменений Layer FiberRef и механизма выполнения дальше по графу не гарантируется.
+- TypeScript не может запретить все случаи утечки экземпляра сервиса и неучтённые Promise. Пользовательский код, который не реагирует на отмену, способен удерживать Stopping или shutdown.
+- Почтовый ящик не теряет сообщения и не реализует сложного ограничения потока. Снимки показывают состояние, а не журнал аудита. Необработанный Cause может содержать чувствительные данные; для журналов предусмотрен `safeSummary`.
+- Не проверялись выполнение в браузере, другие предварительные или основные версии Effect, отдельный путь выполнения в Node и удалённый запуск GitHub Actions. Настройка непрерывной интеграции существует, её команды выполнены только локально.
+- Библиотека не содержит сети, базы данных, пользовательского интерфейса, HMR, загрузчика расширений, нескольких поставщиков одного сервиса, распределённых владений и замены без периода недоступности.
 
-## Release checklist
+## Контрольный список экспериментального выпуска
 
-- [x] Одна реально проверенная линия Effect, без смешения major API.
-- [x] Оба конструктора используют единый lifecycle.
-- [x] Все graph commands, gates, managed use и ordered shutdown реализованы.
-- [x] T01–T40 имеют исполняемые runtime/type доказательства; skipped/todo тестов нет.
-- [x] Scope, поколения, caller cancellation, stale publication и release failures проверены.
-- [x] Независимые ветви и fresh MemoMap сохраняют нужную семантику.
-- [x] TypeScript declarations, examples и внешний consumer реализованы.
-- [x] README, semantics, architecture, compatibility, ADR и changelog актуализированы.
-- [x] Временные probes и старый `Hello via Bun` entrypoint удалены.
-- [x] Пакет остаётся private, experimental 0.1.0; публикация не выполнялась.
+- [x] Используется одна действительно проверенная линия Effect без смешения API основных версий.
+- [x] Оба конструктора используют единый жизненный цикл.
+- [x] Реализованы все команды графа, условия запуска, управляемый use и упорядоченный shutdown.
+- [x] Для T01–T40 есть исполняемые подтверждения в тестах среды выполнения или типов; пропущенных тестов и заготовок нет.
+- [x] Проверены Scope, поколения, отмена вызывающей стороной, устаревшая публикация и ошибки освобождения ресурсов.
+- [x] Независимые ветви и свежий MemoMap сохраняют требуемое поведение.
+- [x] Реализованы объявления TypeScript, примеры и проверка отдельным зависимым приложением.
+- [x] Обновлены README, описание правил работы и устройства, совместимость, ADR и история изменений.
+- [x] Временные проверочные сценарии и старый файл запуска `Hello via Bun` удалены.
+- [x] Пакет остаётся закрытым и экспериментальным, версия 0.1.0; публикация не выполнялась.
