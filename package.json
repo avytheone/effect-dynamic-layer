@@ -7,7 +7,10 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "HANDOFF-dynamic-layer.md",
+    "docs"
   ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -22,7 +25,7 @@
     "test": "bun test",
     "test:types": "tsc --project tsconfig.type-tests.json --noEmit",
     "lint": "biome check .",
-    "build": "bun build src/index.ts --target neutral --external effect --outdir dist && tsc --project tsconfig.build.json",
+    "build": "bun build src/index.ts --target browser --format esm --external effect --outdir dist && tsc --project tsconfig.build.json",
     "test:package": "bun run scripts/test-package.ts",
     "examples": "bun run example:basic && bun run example:effect-factory && bun run example:failure-and-retry",
     "example:basic": "bun run examples/basic.ts",
