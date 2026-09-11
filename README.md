@@ -6,7 +6,7 @@
 
 The library tracks dependencies between services: it starts them in the right order, stops the affected branch, and releases resources. Implementations remain ordinary `Effect` and `Layer` values.
 
-> This project is experimental. The npm package name is **`@avytheone/effect-dynamic-layer`**, but the package has not been published and is not claimed to be production-ready. The verified Effect version is **4.0.0-rc.115**.
+> This project is experimental and is not claimed to be production-ready. The npm package is **`@avytheone/effect-dynamic-layer`** at version **`0.1.0`**. The verified Effect version is **4.0.0-rc.115**.
 
 [Example](#example) · [Installation](#installation) · [Local setup](#local-setup) · [Release process](#release-process) · [Documentation](#documentation) · [Roadmap](#roadmap)
 
@@ -126,17 +126,17 @@ A snapshot can contain an original error with sensitive data. Do not send the en
 
 ## Installation
 
-The intended command after the first npm publication is:
+Install version `0.1.0` from npm:
 
 ```sh
 npm install @avytheone/effect-dynamic-layer
 ```
 
-This command does **not** work from the npm registry yet: version `0.1.0` has not been published. npm automatically installs the exact `effect@4.0.0-rc.115` peer dependency; applications that already use Effect must match this version. Effect is not bundled with the library. Installation of the built tarball, public TypeScript types, and the consumer lifecycle have been verified with npm 11.12.1 under Bun 1.4.2 and Node 24.15.0.
+The package declares the exact `effect@4.0.0-rc.115` peer dependency. npm installs that peer automatically; applications that already use Effect must match this version. Effect is not bundled with the library. Installation of the built tarball, public TypeScript types, and the consumer lifecycle have been verified with npm 11.12.1 under Bun 1.4.2 and Node 24.15.0.
 
 ## Local setup
 
-You need **Bun 1.4.2**. Until the first npm publication, use the repository examples:
+You need **Bun 1.4.2** to run the repository examples:
 
 ```sh
 git clone https://github.com/avytheone/effect-dynamic-layer.git
@@ -169,11 +169,11 @@ Bun installs dependencies, runs tests, and builds JavaScript. TypeScript checks 
 
 ## Release process
 
-The GitHub repository is public and the project uses the [MIT license](LICENSE), copyright 2026 Alexey Yakimanskiy. The release workflow and package have been verified locally, including an npm publication dry run. The npm package is still unpublished: Trusted Publisher setup and an actual OIDC release remain separate steps, not claims implied by preparation.
+The GitHub repository is public and the project uses the [MIT license](LICENSE), copyright 2026 Alexey Yakimanskiy. The package and release workflow have been verified locally, including an npm publication dry run. Registry publication and OIDC publication must not be claimed until each result has actually been observed.
 
-For a release, a maintainer updates the version in `package.json` and the Bun lockfile, runs the complete local checks shown above, commits the verified state, and only then pushes a tag exactly equal to `v${package.version}`. The `release.yml` workflow runs only for `v*` tags on GitHub-hosted Ubuntu, verifies that the tag exactly matches the package version, uses Bun from `.bun-version` with Node 24 and npm 11.12.1, and runs the existing checks. It builds and packs exactly once with `npm pack`—the package's `prepack` script runs the Bun build—then passes that exact tarball by absolute path to `bun run test:package /absolute/path.tgz`.
+After the package has been bootstrapped and npm Trusted Publisher has been configured, later releases use the tag-driven workflow. A maintainer updates the version in `package.json` and the Bun lockfile, runs the complete local checks shown above, commits the verified state, and only then pushes a tag exactly equal to `v${package.version}`. The `release.yml` workflow runs only for `v*` tags on GitHub-hosted Ubuntu, verifies that the tag exactly matches the package version, uses Bun from `.bun-version` with Node 24 and npm 11.12.1, and runs the existing checks. It builds and packs exactly once with `npm pack`—the package's `prepack` script runs the Bun build—then passes that exact tarball by absolute path to `bun run test:package /absolute/path.tgz`.
 
-The workflow publishes the same verified tarball with `npm publish <tarball> --ignore-scripts --access public --provenance --tag <latest|beta>`; it selects `beta` for a prerelease version and `latest` otherwise. Reusing the tarball prevents publication from rebuilding different contents. Publication must use npm's OIDC trusted publishing and must not use an `NPM_TOKEN` secret. Configure the npm Trusted Publisher with these exact fields:
+The workflow publishes the same verified tarball with `npm publish <tarball> --ignore-scripts --access public --provenance --tag <latest|beta>`; it selects `beta` for a prerelease version and `latest` otherwise. Reusing the tarball prevents publication from rebuilding different contents. Later tag-driven publication must use npm's OIDC trusted publishing and must not use an `NPM_TOKEN` secret. Configure the npm Trusted Publisher with these exact fields:
 
 - organization or user: `avytheone`;
 - repository: `effect-dynamic-layer`;
@@ -181,7 +181,15 @@ The workflow publishes the same verified tarball with `npm publish <tarball> --i
 - environment: none;
 - permission: allow direct npm publication, not only creation of a staging release.
 
-A new npm package has no publisher settings until it has been bootstrapped. The first publication is therefore a separate, explicitly authorized maintainer operation using the npm account's current **authentication-and-writes** 2FA policy; it must not be assumed to run unattended. Only after the package exists can the Trusted Publisher settings above be configured and a later tagged release prove OIDC publication. Do not push a release tag, publish to npm, change repository visibility, or change credentials as part of ordinary preparation.
+After the first publication, npm 11.19.1 or newer can configure those fields without a global npm or workflow upgrade:
+
+```sh
+npm exec --yes --package=npm@11.19.1 -- npm trust github @avytheone/effect-dynamic-layer --file release.yml --repository avytheone/effect-dynamic-layer --allow-publish --yes
+```
+
+This command has not yet been executed for the package. Confirm the resulting association with `npm trust list @avytheone/effect-dynamic-layer --json`; npm may request interactive 2FA.
+
+A new npm package has no publisher settings until it has been bootstrapped. The authorized first publication of `0.1.0` is therefore a manual maintainer operation using the npm account's current **authentication-and-writes** 2FA policy: pack once, verify that exact archive with `bun run test:package /absolute/path.tgz`, and publish the same archive with `npm publish <tarball> --ignore-scripts --access public --tag latest`. This bootstrap does not claim CI provenance. Only after the package exists can the Trusted Publisher settings above be configured; a later successful tagged release is the proof of OIDC publication. Publishing any version, pushing a release tag, changing repository visibility, or changing credentials still requires explicit authorization for that operation.
 
 ## Documentation
 

@@ -2,7 +2,7 @@
 
 **English** | [Русский](ru/status.md)
 
-The library has been implemented and verified locally. This includes the approved clean cutover from string node identifiers to control through `Context` services and `LifecycleState`. The intended npm identity is `@avytheone/effect-dynamic-layer` at version `0.1.0`, but the package has not been published, deployed, or verified in a production integration. The original requirements are recorded in `HANDOFF-dynamic-layer.md`; the owner separately clarified that **Effect RC and Bun** must be used instead of the original Effect 3.x, pnpm, and Vitest foundation.
+The library has been implemented and verified locally. This includes the approved clean cutover from string node identifiers to control through `Context` services and `LifecycleState`. The npm package identity is `@avytheone/effect-dynamic-layer`, and version `0.1.0` remains experimental and has not been verified in a production integration. Its current publication state is recorded below. The original requirements are recorded in `HANDOFF-dynamic-layer.md`; the owner separately clarified that **Effect RC and Bun** must be used instead of the original Effect 3.x, pnpm, and Vitest foundation.
 
 ## Exact versions
 
@@ -18,19 +18,19 @@ The library has been implemented and verified locally. This includes the approve
 
 Effect is not bundled into the built package. The `peerDependencies` range is restricted to the exact verified prerelease. npm tags and the list of published versions were checked; results of the dedicated compatibility probe are in [compatibility.md](compatibility.md).
 
-## Current packaging status
+## Current 0.1.0 release status
 
-The project uses the MIT license, copyright 2026 Alexey Yakimanskiy. After an authorized confidentiality review of current files and reachable Git history, the `avytheone/effect-dynamic-layer` repository was made public and GitHub confirmed `PUBLIC` visibility. The package is ready for an authorized first publication, but the npm registry still has no published version. `npm install @avytheone/effect-dynamic-layer` must not be presented as working from the registry until that publication is observed.
+The project uses the MIT license, copyright 2026 Alexey Yakimanskiy. After an authorized confidentiality review of current files and reachable Git history, the `avytheone/effect-dynamic-layer` repository was made public and GitHub confirmed `PUBLIC` visibility. **Current release status (update after registry confirmation):** the owner has explicitly authorized the first `0.1.0` publication; the manual registry bootstrap is pending confirmation, and npm Trusted Publisher can be configured only after it succeeds.
 
 The release contract is:
 
-1. Update the version in `package.json` and the Bun lockfile.
-2. Run the complete local verification set and commit the verified state.
-3. Only with publication authorization, push the exact tag `v${package.version}`.
-4. `release.yml`, triggered only by `v*` tags, verifies the exact tag/version match on GitHub-hosted Ubuntu, uses Bun from `.bun-version` with Node 24 and npm 11.12.1, and repeats the existing checks. It builds and packs exactly once with `npm pack` (`prepack` runs the Bun build), then verifies that exact tarball through `bun run test:package /absolute/path.tgz`.
-5. It publishes the same verified file with `npm publish <tarball> --ignore-scripts --access public --provenance --tag <latest|beta>`, selecting `beta` for a prerelease version and `latest` otherwise.
+1. Update the version in `package.json` and the Bun lockfile, run the complete local verification set, and commit the verified state.
+2. For the first `0.1.0` publication, pack exactly once, verify that exact tarball through `bun run test:package /absolute/path.tgz`, and have the authorized maintainer publish the same file manually with `npm publish <tarball> --ignore-scripts --access public --tag latest` under the npm account's current authentication-and-writes 2FA policy. This bootstrap does not claim CI provenance.
+3. After the package exists, configure npm Trusted Publisher with the fields below.
+4. For each later version, update and verify the version as in step 1, then only with publication authorization push the exact tag `v${package.version}`.
+5. `release.yml`, triggered only by `v*` tags, verifies the exact tag/version match on GitHub-hosted Ubuntu, uses Bun from `.bun-version` with Node 24 and npm 11.12.1, and repeats the existing checks. It builds and packs exactly once with `npm pack` (`prepack` runs the Bun build), verifies that exact tarball through `bun run test:package /absolute/path.tgz`, and publishes the same file with `npm publish <tarball> --ignore-scripts --access public --provenance --tag <latest|beta>`, selecting `beta` for a prerelease version and `latest` otherwise.
 
-The workflow must not use an `NPM_TOKEN`. npm Trusted Publisher must identify user `avytheone`, repository `effect-dynamic-layer`, workflow `release.yml`, no environment, and explicitly allow direct npm publication rather than stage-only access. Because publisher settings cannot be attached to a package before that package exists, the first publication is a separate explicitly authorized maintainer operation under the account's current authentication-and-writes 2FA policy and must not be assumed to run unattended. OIDC can be configured afterward and is only proven by a later successful tagged publication.
+Neither path may use an `NPM_TOKEN`. npm Trusted Publisher must identify user `avytheone`, repository `effect-dynamic-layer`, workflow `release.yml`, no environment, and explicitly allow direct npm publication rather than stage-only access. Publisher settings cannot be attached before the first publication. Afterward, npm 11.19.1 or newer can configure them without a global or workflow npm upgrade through `npm exec --yes --package=npm@11.19.1 -- npm trust github @avytheone/effect-dynamic-layer --file release.yml --repository avytheone/effect-dynamic-layer --allow-publish --yes`; verify the association with `npm trust list @avytheone/effect-dynamic-layer --json`. This setup has not yet been executed, and only a later successful tagged publication proves OIDC.
 
 Local publication preparation was verified with a frozen Bun install, lint, source and public type checks, all 68 runtime tests (231 assertions), and all three examples. Both the self-packing consumer check and the exact release tarball check passed: ordinary npm installation automatically installed the Effect peer, TypeScript compiled public imports and rejected internal/source subpaths, and the consumer completed its lifecycle with exact release counts under Bun 1.4.2 and Node 24.15.0. The actual release packing step and npm publication with `--dry-run` succeeded; no package was sent. Actionlint 1.7.12 accepted both workflows. The actual release tag guard accepted stable and prerelease versions with `latest`/`beta` respectively and rejected a mismatched tag. These checks do not prove GitHub OIDC authentication or npm provenance; that requires a real authorized publication after Trusted Publisher setup.
 
@@ -135,7 +135,7 @@ A final source review focused exclusively on lifecycle behavior found no materia
 - Static Context is captured at make time. Arbitrary propagation of Layer FiberRef changes and runtime settings farther through the graph is not guaranteed.
 - TypeScript cannot prevent every service-instance leak or untracked Promise. User code that does not respond to cancellation can hold Stopping or shutdown.
 - The mailbox is lossless and does not implement sophisticated flow control. Snapshots show state, not an audit log. An unprocessed Cause can contain sensitive data; `safeSummary` is provided for logging.
-- Browser execution, other prerelease or stable Effect versions, a separate Node runtime path, and a remote GitHub Actions run have not been verified. Continuous integration commands have only been run locally; the planned tag-driven OIDC release path has not been exercised.
+- Browser execution, other prerelease or stable Effect versions, and a separate Node runtime path have not been verified. GitHub Actions CI has passed on the current `main`; the tag-driven OIDC release path has not been exercised.
 - The library contains no network, database, user interface, HMR, extension loader, multiple providers for one service, distributed leases, or replacement without an availability gap.
 
 ## Experimental release checklist
@@ -151,4 +151,4 @@ A final source review focused exclusively on lifecycle behavior found no materia
 - [x] Temporary probes and the old `Hello via Bun` launcher have been removed.
 - [x] The package remains private and experimental at version 0.1.0; it has not been published.
 
-The last checkbox records the completed historical private-package acceptance for version 0.1.0. It is not the current packaging policy. The later approved preparation for `@avytheone/effect-dynamic-layer` as a public MIT-licensed npm package overrides that private-package condition without changing the historical evidence. Publication and the release tag still require separate authorization.
+The last checkbox records the completed historical private-package acceptance for version 0.1.0. It is not the current packaging policy. The later approved preparation for `@avytheone/effect-dynamic-layer` as a public MIT-licensed npm package overrides that private-package condition without changing the historical evidence. The authorized first manual publication is tracked above; later package publications and release tags still require explicit authorization.
