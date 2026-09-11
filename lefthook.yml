@@ -1,0 +1,16 @@
+pre-commit:
+  commands:
+    staged-quality:
+      run: bun x --no-install biome check --staged
+
+pre-push:
+  parallel: true
+  commands:
+    lint:
+      run: bun run lint
+    typecheck:
+      run: bun run typecheck
+    test:
+      run: bun test
+    test-types:
+      run: bun run test:types

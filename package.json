@@ -1,0 +1,47 @@
+{
+  "name": "effect-dynamic-layer",
+  "version": "0.1.0",
+  "description": "Explicitly managed dynamic Effect service graphs",
+  "type": "module",
+  "private": true,
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "bun test",
+    "test:types": "tsc --project tsconfig.type-tests.json --noEmit",
+    "lint": "biome check .",
+    "build": "bun build src/index.ts --target neutral --external effect --outdir dist && tsc --project tsconfig.build.json",
+    "test:package": "bun run scripts/test-package.ts",
+    "examples": "bun run example:basic && bun run example:effect-factory && bun run example:failure-and-retry",
+    "example:basic": "bun run examples/basic.ts",
+    "example:effect-factory": "bun run examples/effect-factory.ts",
+    "example:failure-and-retry": "bun run examples/failure-and-retry.ts",
+    "prepare": "lefthook install"
+  },
+  "engines": {
+    "bun": "1.4.2"
+  },
+  "packageManager": "bun@1.4.2",
+  "peerDependencies": {
+    "effect": "4.0.0-rc.115"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@types/bun": "1.4.2",
+    "effect": "4.0.0-rc.115",
+    "lefthook": "2.1.12",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,23 @@
+node_modules/
+
+# Generated package output
+dist/
+coverage/
+*.lcov
+*.tgz
+.tmp/
+
+# Tool caches and logs
+.cache/
+*.tsbuildinfo
+*.log
+report.*.json
+
+# Local environment
+.env
+.env.*.local
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
