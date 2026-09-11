@@ -8,7 +8,7 @@ An experimental TypeScript library for changing a graph of Effect services while
 
 Priorities: correct resource ownership, freedom from races, clear types, and a small API. Convenience and optimization must not weaken these guarantees.
 
-The package has not been published to npm and is not claimed to be production-ready. Do not publish the package, make the private repository public, or deploy anything without a separate instruction.
+The npm package name is `@avytheone/effect-dynamic-layer`, but version `0.1.0` has not been published and the library is not claimed to be production-ready. The GitHub repository is public and MIT-licensed by the owner's decision. Publishing, pushing a release tag, deploying, changing repository visibility, or changing credentials still requires the corresponding authorized operation.
 
 ## Where to find the contract
 
@@ -59,6 +59,16 @@ The full contract is in the [lifecycle semantics](docs/semantics.md). When chang
 - **Shutdown and failures.** `shutdown` waits for ordered cleanup and cannot be interrupted halfway through it. The controller stays alive until required completion messages arrive; capturing a worker's result and sending its completion message are protected from interruption. Release failures and ambiguous rollback failures cannot be cleared by `enable`, `retry`, or `replace`.
 
 In application scenarios, do not conflate UI lifetime, service dependencies, and network availability. A closed `when` condition stops a generation; it does not promise to preserve DOM or unsaved input.
+
+## Package and release policy
+
+- Keep the package name `@avytheone/effect-dynamic-layer`. Installation and imports use that scoped name; the repository remains `avytheone/effect-dynamic-layer`.
+- The license is MIT, copyright 2026 Alexey Yakimanskiy. Do not describe the repository as public until its visibility has actually been changed and verified.
+- Bun owns dependency installation, library checks, tests, and builds. npm is used for publication and for a genuine isolated consumer installation of the packed package. Keep Bun `1.4.2`, Effect `4.0.0-rc.115`, and all other exact dependencies unless a separate compatibility update is requested.
+- Before a release tag, update `package.json` and `bun.lock` for the intended version, complete all local checks, and commit the verified state. Only then may an authorized maintainer push the exact tag `v${package.version}`.
+- `release.yml` is the tag-only (`v*`) GitHub-hosted Ubuntu release path. It must verify the exact tag/version match, use Bun from `.bun-version`, Node 24 and npm 11.12.1, and run all existing checks. It builds and packs once with `npm pack` (`prepack` performs the Bun build), verifies that exact tarball with `bun run test:package /absolute/path.tgz`, then publishes the same file with `npm publish <tarball> --ignore-scripts --access public --provenance --tag <latest|beta>`. Use `beta` for a prerelease version and `latest` otherwise.
+- Publication uses npm OIDC trusted publishing, never an `NPM_TOKEN` secret. npm Trusted Publisher fields are: user `avytheone`, repository `effect-dynamic-layer`, workflow `release.yml`, no environment, with direct npm publication explicitly allowed rather than stage-only access.
+- A new npm package cannot have Trusted Publisher settings before it exists. Its first publication is a distinct, explicitly authorized maintainer action under the account's current authentication-and-writes 2FA policy and must not be assumed to run unattended. Only afterward can the publisher be configured and a later tagged release verify OIDC. Never claim registry installation, provenance, or OIDC publication succeeded until each was actually observed.
 
 ## Verification
 

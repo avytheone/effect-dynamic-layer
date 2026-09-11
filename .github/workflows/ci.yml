@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: ["**"]
   pull_request:
 
 permissions:
@@ -14,6 +15,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Set up Node for the npm consumer
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -35,10 +41,7 @@ jobs:
       - name: Test public types
         run: bun run test:types
 
-      - name: Build declarations and JavaScript
-        run: bun run build
-
-      - name: Test packed package
+      - name: Build and test packed package
         run: bun run test:package
 
       - name: Run examples

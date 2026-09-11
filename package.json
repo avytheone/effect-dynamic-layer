@@ -1,9 +1,18 @@
 {
-  "name": "effect-dynamic-layer",
+  "name": "@avytheone/effect-dynamic-layer",
   "version": "0.1.0",
   "description": "Explicitly managed dynamic Effect service graphs",
+  "license": "MIT",
+  "author": "Alexey Yakimanskiy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/avytheone/effect-dynamic-layer.git"
+  },
+  "homepage": "https://github.com/avytheone/effect-dynamic-layer#readme",
+  "bugs": {
+    "url": "https://github.com/avytheone/effect-dynamic-layer/issues"
+  },
   "type": "module",
-  "private": true,
   "sideEffects": false,
   "files": [
     "dist",
@@ -20,6 +29,10 @@
       "import": "./dist/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "bun test",
@@ -31,6 +44,7 @@
     "example:basic": "bun run examples/basic.ts",
     "example:effect-factory": "bun run examples/effect-factory.ts",
     "example:failure-and-retry": "bun run examples/failure-and-retry.ts",
+    "prepack": "bun run build",
     "prepare": "lefthook install"
   },
   "engines": {

@@ -11,6 +11,8 @@
 
 **Approved public API clarification:** the full transition from string-based target service designations to actual `Context` services has been completed, without retaining the previous interface. `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` have no string overloads, aliases, or separate descriptors. `LifecycleState` is exported as a frozen set of constants and a union type of the same name. This clarification takes precedence over the older signatures using `id` shown below; the examples and table in sections 6–7 have already been updated to the approved form.
 
+**Current packaging override:** the “working name” and original no-publication condition for version 0.1 are retained below as historical evidence. The later approved package identity is `@avytheone/effect-dynamic-layer` at version `0.1.0`, under the MIT license with copyright 2026 Alexey Yakimanskiy. Preparing the repository for public visibility and a tag-driven npm OIDC release is authorized; actually changing visibility, pushing a release tag, performing the first npm publication, or changing publisher settings remains a separate operation. The exact release and npm Trusted Publisher contract is maintained in [README.md](README.md) and [docs/status.md](docs/status.md).
+
 ---
 
 ## 0. Assignment for the Agent
@@ -204,7 +206,7 @@ Do not require users to use type assertions for the ordinary scenario. A heterog
 
 ```ts
 import { Context, Effect, Layer, SubscriptionRef } from "effect"
-import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "dynamic-layer"
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "@avytheone/effect-dynamic-layer"
 
 class Database extends Context.Tag("example/Database")<
   Database,

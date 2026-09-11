@@ -11,6 +11,8 @@
 
 **Одобренное уточнение публичного API:** выполнен полный переход со строковых обозначений целевых сервисов на реальные сервисы `Context`, без сохранения прежнего интерфейса. У `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` нет строковых перегрузок, псевдонимов или отдельных дескрипторов. `LifecycleState` экспортируется как замороженный набор констант и одноимённый тип-объединение. Это уточнение имеет приоритет над старыми сигнатурами с `id`, приведёнными ниже; примеры и таблица в разделах 6–7 уже приведены к одобренной форме.
 
+**Действующее уточнение подготовки пакета:** «рабочее имя» и исходное условие не публиковать версию 0.1 сохранены ниже как исторические свидетельства. Позднее одобренное имя пакета — `@avytheone/effect-dynamic-layer`, версия — `0.1.0`, лицензия — MIT, правообладатель — Alexey Yakimanskiy, 2026 год. Разрешена подготовка репозитория к открытому доступу и выпуску в npm по тегам через OIDC; фактическое изменение доступа, отправка тега выпуска, первая публикация в npm и изменение настроек издателя остаются отдельными операциями. Точный договор выпуска и настройки npm Trusted Publisher поддерживается в [README](README.md) и [описании текущего состояния](status.md).
+
 ---
 
 ## 0. Задание агенту
@@ -204,7 +206,7 @@ Scope для `acquire` предоставляет `DynamicRuntime`, а не по
 
 ```ts
 import { Context, Effect, Layer, SubscriptionRef } from "effect"
-import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "dynamic-layer"
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "@avytheone/effect-dynamic-layer"
 
 class Database extends Context.Tag("example/Database")<
   Database,

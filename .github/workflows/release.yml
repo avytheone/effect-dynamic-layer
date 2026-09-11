@@ -1,0 +1,93 @@
+# One-time npm setup: Trusted Publisher -> GitHub Actions ->
+# avytheone / effect-dynamic-layer / release.yml, no environment.
+# Explicitly allow npm publish. No long-lived npm token is needed.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Set up npm for trusted publishing
+        run: npm install --global npm@11.12.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Check release tag and choose npm dist-tag
+        id: release
+        shell: bash
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          if [[ "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match package version $VERSION" >&2
+            exit 1
+          fi
+          if [[ "$VERSION" == *-* ]]; then
+            echo "dist_tag=beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "dist_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Test public types
+        run: bun run test:types
+
+      - name: Build and pack release artifact
+        id: pack
+        shell: bash
+        run: |
+          FILENAME="$(node -p 'const p = require("./package.json"); p.name.replace(/^@/, "").replace("/", "-") + "-" + p.version + ".tgz"')"
+          npm pack --pack-destination "$RUNNER_TEMP"
+          test -f "$RUNNER_TEMP/$FILENAME"
+          echo "tarball=$RUNNER_TEMP/$FILENAME" >> "$GITHUB_OUTPUT"
+
+      - name: Test the exact release artifact
+        env:
+          PACKAGE_TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: bun run test:package "$PACKAGE_TARBALL"
+
+      - name: Run examples
+        run: bun run examples
+
+      - name: Publish verified artifact through OIDC
+        env:
+          PACKAGE_TARBALL: ${{ steps.pack.outputs.tarball }}
+          DIST_TAG: ${{ steps.release.outputs.dist_tag }}
+        run: npm publish "$PACKAGE_TARBALL" --ignore-scripts --access public --provenance --tag "$DIST_TAG"
