@@ -119,3 +119,9 @@ Reentrant graph mutation из acquire/release и ожидание собстве
 Bun собирает ESM bundle с `--target browser --format esm --external effect`, без обязательных platform API в core; TypeScript выпускает declarations. `test:package` упаковывает реальный tarball, устанавливает его во временный независимый TS consumer, проверяет типы и выполняет lifecycle через публичный импорт. Выбор bundle target и проверка на Bun не являются заявлением о проверенной browser-совместимости или всех поддерживаемых Node runtime.
 
 Не входят: multi-provider/failover, optional/OR requirements, zero-downtime replacement, HMR/plugin loader, сеть, БД, UI, распределённые leases и sandbox недоверенного кода.
+
+## План прикладных реализаций
+
+[Roadmap use cases](docs/roadmap.md) фиксирует семь направлений к реализации: composable UI без Cordis, AI-agent/MCP-tools, NATS workers, backend-интеграции, независимые sessions/tenants, реестр расширений и устройства/streams. Для каждого указаны приоритет, шаги, критерии готовности и границы ответственности.
+
+Это будущие прикладные сценарии, а не перечень уже реализованных интеграций или расширение текущих гарантий ядра. Первые три показательных приложения — UI, agent runtime и worker; остальные направления также остаются в плане.
