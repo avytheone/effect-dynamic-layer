@@ -169,7 +169,7 @@ Bun installs dependencies, runs tests, and builds JavaScript. TypeScript checks 
 
 ## Release process
 
-The GitHub repository is public and the project uses the [MIT license](LICENSE), copyright 2026 Alexey Yakimanskiy. The package and release workflow have been verified locally, including an npm publication dry run. Registry publication and OIDC publication must not be claimed until each result has actually been observed.
+The GitHub repository is public and the project uses the [MIT license](LICENSE), copyright 2026 Alexey Yakimanskiy. Version `0.1.0` is [published on npm](https://www.npmjs.com/package/@avytheone/effect-dynamic-layer). Its registry integrity matches the verified archive, and a fresh installation by package name has passed the README example under Bun and Node.
 
 After the package has been bootstrapped and npm Trusted Publisher has been configured, later releases use the tag-driven workflow. A maintainer updates the version in `package.json` and the Bun lockfile, runs the complete local checks shown above, commits the verified state, and only then pushes a tag exactly equal to `v${package.version}`. The `release.yml` workflow runs only for `v*` tags on GitHub-hosted Ubuntu, verifies that the tag exactly matches the package version, uses Bun from `.bun-version` with Node 24 and npm 11.12.1, and runs the existing checks. It builds and packs exactly once with `npm pack`—the package's `prepack` script runs the Bun build—then passes that exact tarball by absolute path to `bun run test:package /absolute/path.tgz`.
 
@@ -187,9 +187,9 @@ After the first publication, npm 11.19.1 or newer can configure those fields wit
 npm exec --yes --package=npm@11.19.1 -- npm trust github @avytheone/effect-dynamic-layer --file release.yml --repository avytheone/effect-dynamic-layer --allow-publish --yes
 ```
 
-This command has not yet been executed for the package. Confirm the resulting association with `npm trust list @avytheone/effect-dynamic-layer --json`; npm may request interactive 2FA.
+This command has been executed with interactive 2FA. npm confirmed creation of the GitHub trust configuration for `avytheone/effect-dynamic-layer`, `release.yml`, with `publish` and `stage publish` permissions. Do not recreate it for each release. To inspect it later, use `npm trust list @avytheone/effect-dynamic-layer --json`; npm may require a separate interactive 2FA confirmation even for that read.
 
-A new npm package has no publisher settings until it has been bootstrapped. The authorized first publication of `0.1.0` is therefore a manual maintainer operation using the npm account's current **authentication-and-writes** 2FA policy: pack once, verify that exact archive with `bun run test:package /absolute/path.tgz`, and publish the same archive with `npm publish <tarball> --ignore-scripts --access public --tag latest`. This bootstrap does not claim CI provenance. Only after the package exists can the Trusted Publisher settings above be configured; a later successful tagged release is the proof of OIDC publication. Publishing any version, pushing a release tag, changing repository visibility, or changing credentials still requires explicit authorization for that operation.
+Version `0.1.0` was the authorized manual bootstrap: the verified tarball was published unchanged using account authentication and 2FA, without CI provenance. Trusted Publisher was configured afterward. Do not republish `0.1.0` or push its tag expecting the release workflow to publish it again: npm versions are immutable. A later successful tagged release will be the end-to-end proof of OIDC publication. Publishing another version, pushing a release tag, changing repository visibility, or changing credentials still requires explicit authorization for that operation.
 
 ## Documentation
 
