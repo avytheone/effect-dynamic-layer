@@ -1,7 +1,7 @@
 pre-commit:
   commands:
     staged-quality:
-      run: bun x --no-install biome check --staged
+      run: bun x --no-install biome check --staged --no-errors-on-unmatched
 
 pre-push:
   parallel: true
