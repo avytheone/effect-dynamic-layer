@@ -848,21 +848,23 @@ pnpm example:basic
 
 Выпуск 0.1 завершён, когда одновременно выполнено следующее:
 
-- [ ] Зафиксирована и реально проверена одна major-линейка Effect, нет смешения v3/v4 API.
-- [ ] Оба конструктора fromLayer/fromEffect используют одну lifecycle-реализацию.
-- [ ] register/enable/disable/replace/unregister/retry реализованы, не заглушены.
-- [ ] Boolean gate действительно реактивен и не теряет наблюдение после остановки сервиса.
-- [ ] Все обязательные acceptance tests проходят; нет пропущенных тестов, маскирующих недоделанные гарантии.
-- [ ] Есть отдельные доказательные тесты stale publication, reverse teardown и use/admission cancellation.
-- [ ] Обычный API не требует `any`/casts у пользователя; отрицательные type-tests исполняются.
-- [ ] Не пересоздаются независимые ветви и не возвращаются старые memoized сервисы.
-- [ ] На успешном cooperative shutdown баланс acquired/released ресурсов сходится, tracked fibers/scopes/calls отсутствуют.
-- [ ] Ошибки release и некооперативное завершение не скрыты и не объявлены успешными.
-- [ ] Работают exports, declarations и внешний consumer собранного пакета.
-- [ ] README объясняет гарантии, ограничения, interruption внешних операций и запрет на service escape.
-- [ ] Есть рабочие basic/effect-factory/failure examples без реальной инфраструктуры.
-- [ ] Нет HMR, сети, БД, UI, arbitrary plugin loader или других незапрошенных подсистем.
-- [ ] Финальный отчёт отличает «реализовано», «проверено» и «не проверено».
+**Приёмка завершена:** результаты проверок и матрица T01–T40 — в [docs/status.md](docs/status.md). По явному решению владельца использованы Effect `4.0.0-rc.115` и Bun вместо исходного baseline v3/pnpm/Vitest; уточнения семантики зафиксированы в ADR.
+
+- [x] Зафиксирована и реально проверена одна major-линейка Effect, нет смешения v3/v4 API.
+- [x] Оба конструктора fromLayer/fromEffect используют одну lifecycle-реализацию.
+- [x] register/enable/disable/replace/unregister/retry реализованы, не заглушены.
+- [x] Boolean gate действительно реактивен и не теряет наблюдение после остановки сервиса.
+- [x] Все обязательные acceptance tests проходят; нет пропущенных тестов, маскирующих недоделанные гарантии.
+- [x] Есть отдельные доказательные тесты stale publication, reverse teardown и use/admission cancellation.
+- [x] Обычный API не требует `any`/casts у пользователя; отрицательные type-tests исполняются.
+- [x] Не пересоздаются независимые ветви и не возвращаются старые memoized сервисы.
+- [x] На успешном cooperative shutdown баланс acquired/released ресурсов сходится, tracked fibers/scopes/calls отсутствуют.
+- [x] Ошибки release и некооперативное завершение не скрыты и не объявлены успешными.
+- [x] Работают exports, declarations и внешний consumer собранного пакета.
+- [x] README объясняет гарантии, ограничения, interruption внешних операций и запрет на service escape.
+- [x] Есть рабочие basic/effect-factory/failure examples без реальной инфраструктуры.
+- [x] Нет HMR, сети, БД, UI, arbitrary plugin loader или других незапрошенных подсистем.
+- [x] Финальный отчёт отличает «реализовано», «проверено» и «не проверено».
 
 Число строк кода не является критерием. Не жертвовать ownership и race-тестами ради обещания «ядро на 300 строк».
 
