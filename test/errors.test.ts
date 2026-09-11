@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Exit, Layer, SubscriptionRef } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement, safeSummary } from "../src/index.js";
+import {
+  DynamicLayer,
+  DynamicRuntime,
+  LifecycleState,
+  Requirement,
+  safeSummary,
+} from "../src/index.js";
 
 const Resource = Context.Service<{ readonly value: number }>("test/errors/Resource");
 const Dependent = Context.Service<{ readonly value: number }>("test/errors/Dependent");
@@ -26,8 +32,8 @@ describe("DynamicRuntime failures", () => {
               acquire: Effect.die("defect"),
             }),
           );
-          yield* runtime.awaitState("typed", "Failed");
-          yield* runtime.awaitState("defect", "Failed");
+          yield* runtime.awaitState(Resource, LifecycleState.Failed);
+          yield* runtime.awaitState(Defect, LifecycleState.Failed);
           const nodes = (yield* runtime.snapshot).nodes;
           const typed = nodes.find((node) => node.id === "typed")?.state;
           const defect = nodes.find((node) => node.id === "defect")?.state;
@@ -60,7 +66,7 @@ describe("DynamicRuntime failures", () => {
               ),
             }),
           );
-          yield* runtime.awaitState("failed", "Failed");
+          yield* runtime.awaitState(Resource, LifecycleState.Failed);
           yield* SubscriptionRef.set(gate, true);
           const Other = Context.Service<{ readonly value: number }>("test/errors/Other");
           yield* runtime.register(
@@ -70,7 +76,7 @@ describe("DynamicRuntime failures", () => {
               acquire: Effect.succeed({ value: 1 }),
             }),
           );
-          yield* runtime.awaitState("other", "Active");
+          yield* runtime.awaitState(Other, LifecycleState.Active);
           yield* runtime.awaitIdle();
           expect(attempts).toBe(1);
         }),
@@ -95,11 +101,11 @@ describe("DynamicRuntime failures", () => {
               ),
             }),
           );
-          yield* runtime.awaitState("resource", "Failed");
-          yield* runtime.retry("resource");
-          yield* runtime.awaitState("resource", "Active");
+          yield* runtime.awaitState(Resource, LifecycleState.Failed);
+          yield* runtime.retry(Resource);
+          yield* runtime.awaitState(Resource, LifecycleState.Active);
           expect(attempts).toBe(2);
-          yield* runtime.retry("resource");
+          yield* runtime.retry(Resource);
           yield* runtime.awaitIdle();
           expect(attempts).toBe(2);
         }),
@@ -119,7 +125,7 @@ describe("DynamicRuntime failures", () => {
               acquire: Effect.succeed({ value: 1 }),
             }),
           );
-          yield* runtime.awaitState("resource", "Active");
+          yield* runtime.awaitState(Resource, LifecycleState.Active);
           const duplicateId = yield* Effect.exit(
             runtime.register(
               DynamicLayer.fromEffect(Dependent)({
@@ -140,7 +146,7 @@ describe("DynamicRuntime failures", () => {
           );
           const selfCycle = yield* Effect.exit(
             runtime.replace(
-              "resource",
+              Resource,
               DynamicLayer.fromEffect(Resource)({
                 id: "resource",
                 requires: Requirement.service(Resource),
@@ -172,9 +178,9 @@ describe("DynamicRuntime failures", () => {
                 }),
               }),
             );
-            yield* runtime.awaitState("resource", "Active");
-            yield* runtime.disable("resource");
-            yield* runtime.awaitState("resource", "Failed");
+            yield* runtime.awaitState(Resource, LifecycleState.Active);
+            yield* runtime.disable(Resource);
+            yield* runtime.awaitState(Resource, LifecycleState.Failed);
             stateTag = (yield* runtime.snapshot).nodes[0]?.state._tag;
           }),
         ),
@@ -206,12 +212,12 @@ describe("DynamicRuntime failures", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("resource", "Active");
-          yield* runtime.disable("resource");
+          yield* runtime.awaitState(Resource, LifecycleState.Active);
+          yield* runtime.disable(Resource);
           yield* Deferred.await(finalizerStarted);
           expect((yield* runtime.snapshot).nodes[0]?.state._tag).toBe("Stopping");
           yield* Deferred.succeed(finalizerRelease, void 0);
-          yield* runtime.awaitState("resource", "Disabled");
+          yield* runtime.awaitState(Resource, LifecycleState.Disabled);
         }),
       ),
     );
@@ -231,7 +237,7 @@ describe("DynamicRuntime failures", () => {
             layer: Layer.empty,
           });
           yield* runtime.register(malformed);
-          yield* runtime.awaitState("malformed", "Failed");
+          yield* runtime.awaitState(ReferenceOutput, LifecycleState.Failed);
           const snapshot = yield* runtime.snapshot;
           expect(snapshot.nodes[0]?.state._tag).toBe("Failed");
         }),
@@ -262,11 +268,11 @@ describe("DynamicRuntime failures", () => {
               }),
             );
             yield* Deferred.await(started);
-            yield* runtime.disable("double-defect");
+            yield* runtime.disable(Resource);
             yield* Deferred.succeed(releaseBuild, void 0);
-            yield* runtime.awaitState("double-defect", "Failed");
-            yield* runtime.enable("double-defect");
-            yield* runtime.retry("double-defect");
+            yield* runtime.awaitState(Resource, LifecycleState.Failed);
+            yield* runtime.enable(Resource);
+            yield* runtime.retry(Resource);
             yield* runtime.awaitIdle();
             const state = (yield* runtime.snapshot).nodes[0]?.state;
             expect(state?._tag).toBe("Failed");
@@ -298,14 +304,14 @@ describe("DynamicRuntime failures", () => {
               }),
             });
             yield* runtime.register(failedRelease);
-            yield* runtime.awaitState("resource", "Active");
-            yield* runtime.disable("resource");
-            yield* runtime.awaitState("resource", "Failed");
-            yield* runtime.enable("resource");
+            yield* runtime.awaitState(Resource, LifecycleState.Active);
+            yield* runtime.disable(Resource);
+            yield* runtime.awaitState(Resource, LifecycleState.Failed);
+            yield* runtime.enable(Resource);
             yield* SubscriptionRef.set(gate, false);
             yield* SubscriptionRef.set(gate, true);
-            yield* runtime.replace("resource", failedRelease);
-            yield* runtime.retry("resource");
+            yield* runtime.replace(Resource, failedRelease);
+            yield* runtime.retry(Resource);
             yield* runtime.awaitIdle();
             const state = (yield* runtime.snapshot).nodes[0]?.state;
             expect(state?._tag).toBe("Failed");

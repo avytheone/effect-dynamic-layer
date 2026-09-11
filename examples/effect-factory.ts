@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 class BackendConfig extends Context.Service<BackendConfig, { readonly mode: "local" | "remote" }>()(
   "factory/BackendConfig",
@@ -33,17 +33,17 @@ const program = Effect.scoped(
         acquire: Effect.succeed({ mode: "local" }),
       }),
     );
-    yield* runtime.awaitState("backend", "Active");
+    yield* runtime.awaitState(Backend, LifecycleState.Active);
     yield* runtime.use(Backend, (backend) => Effect.log(backend.name));
     yield* runtime.replace(
-      "config",
+      BackendConfig,
       DynamicLayer.fromEffect(BackendConfig)({
         id: "config",
         requires: Requirement.empty,
         acquire: Effect.succeed({ mode: "remote" }),
       }),
     );
-    yield* runtime.awaitState("backend", "Active");
+    yield* runtime.awaitState(Backend, LifecycleState.Active);
     yield* runtime.use(Backend, (backend) => Effect.log(backend.name));
   }),
 );

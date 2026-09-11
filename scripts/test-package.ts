@@ -54,7 +54,7 @@ try {
   await writeFile(
     join(workspace, "consumer.ts"),
     `import { Context, Effect } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "${metadata.name}";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "${metadata.name}";
 
 // @ts-expect-error Internal implementation modules are not a public export.
 import type * as InternalGraph from "${metadata.name}/internal/graph";
@@ -70,7 +70,11 @@ const program = Effect.scoped(Effect.gen(function* () {
     requires: Requirement.empty,
     acquire: Effect.succeed({ message: "built package works" }),
   }));
-  yield* runtime.awaitState("greeting", "Active");
+  yield* runtime.awaitState(Greeting, LifecycleState.Active);
+  yield* runtime.disable(Greeting);
+  yield* runtime.awaitState(Greeting, LifecycleState.Disabled);
+  yield* runtime.enable(Greeting);
+  yield* runtime.awaitState(Greeting, LifecycleState.Active);
   const message = yield* runtime.use(Greeting, (service) => Effect.succeed(service.message));
   if (message !== "built package works") throw new Error("Unexpected service result");
   yield* runtime.shutdown;

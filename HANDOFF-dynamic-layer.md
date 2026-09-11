@@ -7,6 +7,8 @@
 **Целевой выпуск:** `0.1.0`, experimental.  
 **Статус этого файла:** проектная спецификация, а не описание уже существующего API. Примеры ниже задают желаемую эргономику; их нужно превратить в компилируемые и проверяемые examples.
 
+**Одобренное уточнение публичного API:** выполнен clean cutover со строковых targets на реальные `Context` services. `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` не имеют строковых overloads, aliases или отдельных handles. `LifecycleState` экспортируется как замороженный набор констант и одноимённый union type. Это уточнение имеет приоритет над старыми `id`-сигнатурами ниже; примеры и таблица раздела 6–7 уже приведены к одобренной форме.
+
 ---
 
 ## 0. Задание агенту
@@ -198,7 +200,7 @@ Scope для acquire предоставляет runtime, а не пользов�
 
 ```ts
 import { Context, Effect, Layer, SubscriptionRef } from "effect"
-import { DynamicLayer, DynamicRuntime, Requirement } from "dynamic-layer"
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "dynamic-layer"
 
 class Database extends Context.Tag("example/Database")<
   Database,
@@ -242,7 +244,7 @@ const program = Effect.scoped(
       })
     )
 
-    yield* runtime.awaitState("analytics", "Pending")
+    yield* runtime.awaitState(Analytics, LifecycleState.Pending)
 
     yield* runtime.register(
       DynamicLayer.fromLayer(Database)({
@@ -252,18 +254,18 @@ const program = Effect.scoped(
       })
     )
 
-    yield* runtime.awaitState("analytics", "Active")
+    yield* runtime.awaitState(Analytics, LifecycleState.Active)
     yield* runtime.use(Analytics, (service) => service.read)
 
-    yield* runtime.disable("database")
-    yield* runtime.awaitState("database", "Disabled")
-    yield* runtime.awaitState("analytics", "Pending")
+    yield* runtime.disable(Database)
+    yield* runtime.awaitState(Database, LifecycleState.Disabled)
+    yield* runtime.awaitState(Analytics, LifecycleState.Pending)
 
-    yield* runtime.enable("database")
-    yield* runtime.awaitState("analytics", "Active")
+    yield* runtime.enable(Database)
+    yield* runtime.awaitState(Analytics, LifecycleState.Active)
 
     yield* runtime.replace(
-      "database",
+      Database,
       DynamicLayer.fromLayer(Database)({
         id: "database",
         requires: Requirement.empty,
@@ -271,14 +273,14 @@ const program = Effect.scoped(
       })
     )
 
-    yield* runtime.awaitState("analytics", "Active")
+    yield* runtime.awaitState(Analytics, LifecycleState.Active)
     yield* runtime.use(Analytics, (service) => service.read)
 
     yield* SubscriptionRef.set(enabled, false)
-    yield* runtime.awaitState("analytics", "Pending")
+    yield* runtime.awaitState(Analytics, LifecycleState.Pending)
 
     yield* SubscriptionRef.set(enabled, true)
-    yield* runtime.awaitState("analytics", "Active")
+    yield* runtime.awaitState(Analytics, LifecycleState.Active)
   })
 )
 
@@ -330,33 +332,33 @@ const selectedLayer = Layer.unwrapEffect(
 
 | Операция | Смысл |
 |---|---|
-| `register(description)` | Проверить описание и атомарно добавить его в desired graph. По умолчанию enabled. |
-| `enable(id)` / `disable(id)` | Изменить desired enablement. Повтор одинаковой команды — no-op. |
-| `replace(id, description)` | Атомарно сменить рецепт, сохранив node id и предоставляемый service key. |
-| `unregister(id)` | Отозвать компонент, дождаться корректной внутренней очистки перед окончательным удалением его runtime-записи. |
-| `retry(id)` | Разрешить новую попытку после failed acquisition для того же набора входов. |
+| `register(description)` | Проверить описание и атомарно добавить его в desired graph. Обязательный `description.id` остаётся диагностическим metadata. По умолчанию enabled. |
+| `enable(Service)` / `disable(Service)` | Найти регистрацию по реальному service key и изменить desired enablement. Повтор одинаковой команды — no-op. |
+| `replace(Service, description)` | Типобезопасно сменить рецепт того же service; сохранить identity node `id` и export key, выполнив stop-before-start. |
+| `unregister(Service)` | Отозвать компонент, оставив retiring-запись до корректной внутренней очистки. |
+| `retry(Service)` | Разрешить новую попытку после failed acquisition для того же набора входов. |
 | `snapshot` | Получить immutable диагностический snapshot, без объектов сервисов. |
 | `changes` | Поток актуальных snapshots; начальное состояние и дальнейшие версии. |
-| `awaitState(id, state)` | Дождаться состояния, с корректной отменой ожидания и ошибкой при удалении/закрытии runtime. |
+| `awaitState(Service, LifecycleState.Active)` | Дождаться состояния выбранной регистрации, с корректной отменой и ошибкой при удалении/закрытии runtime. |
 | `awaitIdle()` | Барьер: на наблюдаемом шаге нет незавершённых lifecycle-операций или уже принятых необработанных изменений. |
-| `use(tag, callback)` | Выполнить Effect с закреплённым текущим поколением сервиса и управляемой отменой. |
+| `use(Service, callback)` | Выполнить Effect с закреплённым текущим поколением сервиса и управляемой отменой. |
 | `shutdown` | Idempotent ordered shutdown; также вызывается при закрытии owning Scope. |
 
 ### 7.1. Подтверждение команды не равно завершению I/O
 
-`register`, `enable`, `disable`, `replace`, `unregister`, `retry` подтверждают **приём и применение desired-state изменения контроллером**, а не завершение всех acquisition/finalizers.
+`register`, `enable`, `disable`, `replace`, `unregister`, `retry` подтверждают **приём и применение desired-state изменения контроллером**, а не завершение всех acquisition/finalizers. Service key разрешается внутри controller по полному authoritative map, включая Pending, Disabled и retiring-записи; поиск только в publications запрещён.
 
 Однако отозвание старых публикаций при invalidating-команде входит в тот же атомарный шаг. После успешного возврата `disable` новый `use` не должен получить старое поколение затронутой ветки.
 
-`awaitState` и `awaitIdle` используются отдельно. Не оставляй этот контракт неявным.
+`awaitState` и `awaitIdle` используются отдельно. `awaitState` закрепляет выбранную стабильную запись регистрации: replacement продолжает ожидание на той же записи, но unregister и более поздняя регистрация того же service key не перенаправляют старый waiter.
 
 `awaitIdle` не означает «все узлы Active»: допустимы Pending/Disabled/Failed. Он не ждёт завершения долгоживущих рабочих fibers или control-подписок. Будущие внешние изменения могут сразу нарушить idle; это не блокировка мира.
 
 Изменение `SubscriptionRef` подтверждается самим ref, а не контроллером runtime. Поэтому после `SubscriptionRef.set` нужно дождаться соответствующего состояния, а не предполагать синхронную обработку gate.
 
-`awaitState` должен сначала проверить искомое состояние. Если вместо ожидаемого состояния узел переходит в Failed, ожидание должно завершаться диагностируемой ошибкой, а не висеть бесконечно. Ожидание самого Failed допустимо. Предоставь возможность обернуть ожидание обычным Effect timeout.
+`awaitState` должен сначала проверить искомое состояние. Если вместо ожидаемого состояния узел переходит в Failed, ожидание должно завершаться диагностируемой ошибкой, а не висеть бесконечно. Ожидание `LifecycleState.Failed` допустимо. Предоставь возможность обернуть ожидание обычным Effect timeout.
 
-После перехода runtime в Closing новые управляющие команды, новые use и ожидания невозможных состояний завершаются `RuntimeClosing`/`RuntimeClosed`, а не теряются в очереди. Неизвестный id — явная ошибка.
+После перехода runtime в Closing новые управляющие команды, новые use и ожидания невозможных состояний завершаются `RuntimeClosing`/`RuntimeClosed`, а не теряются в очереди. Никогда не зарегистрированный service key возвращает `ServiceNotRegistered { serviceKey }`; управляющая команда для retiring-записи — `NodeRetiring`; недостижимое ожидание удаляемой записи — `AwaitStateUnavailable { id, expected }`.
 
 ## 8. Состояния узла
 
@@ -620,7 +622,7 @@ Interop-ограничения должны быть в README. Не экспо�
 По умолчанию **нет бесконечного автоматического retry**. На одном и том же fingerprint после ошибки остаёмся Failed. Новая попытка разрешается:
 
 ```text
-явным retry(id);
+явным retry(Service);
 реальным изменением соответствующего входного поколения;
 новым activation cycle gate/enablement;
 replace описания.

@@ -1,5 +1,5 @@
 import { Context, Effect } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 class Report extends Context.Service<Report, { readonly title: string }>()("retry/Report") {}
 
@@ -19,12 +19,12 @@ const program = Effect.scoped(
         }),
       }),
     );
-    yield* runtime.awaitState("report", "Failed");
+    yield* runtime.awaitState(Report, LifecycleState.Failed);
     yield* runtime.awaitIdle();
     if (attempts !== 1) throw new Error("Acquisition must not retry automatically");
     yield* Effect.log("Failure observed; explicitly allowing one new attempt");
-    yield* runtime.retry("report");
-    yield* runtime.awaitState("report", "Active");
+    yield* runtime.retry(Report);
+    yield* runtime.awaitState(Report, LifecycleState.Active);
     yield* runtime.use(Report, (report) => Effect.log(report.title));
   }),
 );

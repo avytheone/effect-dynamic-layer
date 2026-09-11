@@ -1,5 +1,16 @@
 import { Cause } from "effect";
 
+export const LifecycleState = Object.freeze({
+  Pending: "Pending",
+  Starting: "Starting",
+  Active: "Active",
+  Stopping: "Stopping",
+  Disabled: "Disabled",
+  Failed: "Failed",
+} as const);
+
+export type LifecycleState = (typeof LifecycleState)[keyof typeof LifecycleState];
+
 export type RuntimeState = "Running" | "Closing" | "Closed" | "CloseFailed";
 export type FailurePhase = "acquire" | "gate" | "release";
 export type RevocationReason =

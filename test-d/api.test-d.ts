@@ -1,5 +1,11 @@
 import { Context, Effect, Layer } from "effect";
-import { DynamicLayer, type DynamicRuntime, Requirement, type UseError } from "../src/index.js";
+import {
+  DynamicLayer,
+  type DynamicRuntime,
+  LifecycleState,
+  Requirement,
+  type UseError,
+} from "../src/index.js";
 
 class Database extends Context.Service<Database, { readonly label: string }>()("types/Database") {}
 class Auth extends Context.Service<Auth, { readonly subject: string }>()("types/Auth") {}
@@ -128,6 +134,36 @@ const scopedTypeProof: Expect<
 void scopedTypeProof;
 
 declare const runtime: DynamicRuntime.DynamicRuntime;
+
+const databaseDescription = DynamicLayer.fromLayer(Database)({
+  id: "database",
+  requires: Requirement.empty,
+  layer: databaseLayer,
+});
+
+runtime.enable(Database);
+runtime.disable(Database);
+runtime.retry(Database);
+runtime.unregister(Database);
+runtime.replace(Database, databaseDescription);
+runtime.awaitState(Database, LifecycleState.Active);
+
+// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+runtime.enable("database");
+// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+runtime.disable("database");
+// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+runtime.retry("database");
+// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+runtime.unregister("database");
+// @ts-expect-error replace выбирает регистрацию по Context service, а не по строковому node id.
+runtime.replace("database", databaseDescription);
+// @ts-expect-error awaitState выбирает регистрацию по Context service, а не по строковому node id.
+runtime.awaitState("database", LifecycleState.Active);
+// @ts-expect-error awaitState принимает только экспортированные состояния lifecycle.
+runtime.awaitState(Database, "Unknown");
+// @ts-expect-error NoInfer не позволяет описанию другого service изменить тип целевого service.
+runtime.replace(Database, fromEffectDescription);
 
 const useEffect = runtime.use(Analytics, (analytics) =>
   Effect.gen(function* () {

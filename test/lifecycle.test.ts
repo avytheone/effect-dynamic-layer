@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement, type RuntimeSnapshot } from "../src/index.js";
+import {
+  DynamicLayer,
+  DynamicRuntime,
+  LifecycleState,
+  Requirement,
+  type RuntimeSnapshot,
+} from "../src/index.js";
 
 const Database = Context.Service<{ readonly generation: number }>("test/lifecycle/Database");
 const Analytics = Context.Service<{ readonly databaseGeneration: number }>(
@@ -39,7 +45,7 @@ describe("DynamicRuntime lifecycle", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("database", "Active");
+          yield* runtime.awaitState(Database, LifecycleState.Active);
           yield* runtime.shutdown;
           yield* runtime.shutdown;
         }),
@@ -66,7 +72,7 @@ describe("DynamicRuntime lifecycle", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("analytics", "Pending");
+          yield* runtime.awaitState(Analytics, LifecycleState.Pending);
           expect(consumerAcquired).toBe(0);
           yield* runtime.register(
             DynamicLayer.fromEffect(Database)({
@@ -75,7 +81,7 @@ describe("DynamicRuntime lifecycle", () => {
               acquire: Effect.succeed({ generation: 1 }),
             }),
           );
-          yield* runtime.awaitState("analytics", "Active");
+          yield* runtime.awaitState(Analytics, LifecycleState.Active);
           expect(consumerAcquired).toBe(1);
         }),
       ),
@@ -130,12 +136,12 @@ describe("DynamicRuntime lifecycle", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("view", "Active");
+          yield* runtime.awaitState(ViewModel, LifecycleState.Active);
           const before = yield* runtime.snapshot;
-          yield* runtime.disable("database");
-          yield* runtime.awaitState("database", "Disabled");
-          yield* runtime.enable("database");
-          yield* runtime.awaitState("view", "Active");
+          yield* runtime.disable(Database);
+          yield* runtime.awaitState(Database, LifecycleState.Disabled);
+          yield* runtime.enable(Database);
+          yield* runtime.awaitState(ViewModel, LifecycleState.Active);
           const value = yield* runtime.use(ViewModel, (service) =>
             Effect.succeed(service.analyticsGeneration),
           );
@@ -201,8 +207,8 @@ describe("DynamicRuntime lifecycle", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("join", "Active");
-          yield* runtime.disable("database");
+          yield* runtime.awaitState(Join, LifecycleState.Active);
+          yield* runtime.disable(Database);
           yield* runtime.awaitIdle();
         }),
       ),
@@ -229,7 +235,7 @@ describe("DynamicRuntime lifecycle", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("database", "Failed");
+          yield* runtime.awaitState(Database, LifecycleState.Failed);
           const exit = yield* Effect.exit(
             runtime.use(Database, (service) => Effect.succeed(service.generation)),
           );
@@ -258,11 +264,11 @@ describe("DynamicRuntime lifecycle", () => {
             }),
           );
           yield* Deferred.await(started);
-          yield* runtime.disable("database");
+          yield* runtime.disable(Database);
           const snapshot = yield* runtime.snapshot;
           expect(nodeState(snapshot, "database")).toBe("Stopping");
           yield* Deferred.succeed(blocker, void 0);
-          yield* runtime.awaitState("database", "Disabled");
+          yield* runtime.awaitState(Database, LifecycleState.Disabled);
         }),
       ),
     );
@@ -305,8 +311,8 @@ describe("DynamicRuntime lifecycle", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("analytics", "Active");
-          yield* runtime.disable("database");
+          yield* runtime.awaitState(Analytics, LifecycleState.Active);
+          yield* runtime.disable(Database);
           yield* runtime.awaitIdle();
         }),
       ),

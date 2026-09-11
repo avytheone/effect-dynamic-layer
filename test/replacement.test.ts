@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Exit } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 const Provider = Context.Service<{ readonly value: string }>("test/replacement/Provider");
 const Consumer = Context.Service<{ readonly value: string }>("test/replacement/Consumer");
@@ -41,13 +41,13 @@ describe("DynamicRuntime replacement", () => {
               acquire: Effect.sync(() => ({ value: String(++otherAcquires) })),
             }),
           );
-          yield* runtime.awaitState("consumer", "Active");
-          yield* runtime.awaitState("other", "Active");
+          yield* runtime.awaitState(Consumer, LifecycleState.Active);
+          yield* runtime.awaitState(Other, LifecycleState.Active);
           const otherGeneration = (yield* runtime.snapshot).nodes.find(
             (node) => node.id === "other",
           )?.generationId;
-          yield* runtime.replace("provider", provider("B"));
-          yield* runtime.awaitState("consumer", "Active");
+          yield* runtime.replace(Provider, provider("B"));
+          yield* runtime.awaitState(Consumer, LifecycleState.Active);
           expect(yield* runtime.use(Consumer, (service) => Effect.succeed(service.value))).toBe(
             "B",
           );
@@ -75,12 +75,12 @@ describe("DynamicRuntime replacement", () => {
             ),
           );
           yield* Deferred.await(started);
-          yield* runtime.disable("provider");
+          yield* runtime.disable(Provider);
           expect(Exit.hasFails(yield* Effect.exit(runtime.use(Provider, Effect.succeed)))).toBe(
             true,
           );
           yield* Deferred.succeed(release, void 0);
-          yield* runtime.awaitState("provider", "Disabled");
+          yield* runtime.awaitState(Provider, LifecycleState.Disabled);
           expect(Exit.hasFails(yield* Effect.exit(runtime.use(Provider, Effect.succeed)))).toBe(
             true,
           );
@@ -116,14 +116,14 @@ describe("DynamicRuntime replacement", () => {
             }),
           );
           yield* Deferred.await(firstStarted);
-          yield* runtime.replace("provider", provider("B"));
+          yield* runtime.replace(Provider, provider("B"));
           expect(
             Exit.hasFails(
               yield* Effect.exit(runtime.use(Consumer, (service) => Effect.succeed(service.value))),
             ),
           ).toBe(true);
           yield* Deferred.succeed(firstRelease, void 0);
-          yield* runtime.awaitState("consumer", "Active");
+          yield* runtime.awaitState(Consumer, LifecycleState.Active);
           expect(yield* runtime.use(Consumer, (service) => Effect.succeed(service.value))).toBe(
             "B",
           );
@@ -139,18 +139,18 @@ describe("DynamicRuntime replacement", () => {
         Effect.gen(function* () {
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(provider("A"));
-          yield* runtime.awaitState("provider", "Active");
+          yield* runtime.awaitState(Provider, LifecycleState.Active);
           const operations = yield* Effect.all(
             [
-              runtime.replace("provider", provider("B")),
-              runtime.disable("provider"),
-              runtime.enable("provider"),
-              runtime.replace("provider", provider("C")),
+              runtime.replace(Provider, provider("B")),
+              runtime.disable(Provider),
+              runtime.enable(Provider),
+              runtime.replace(Provider, provider("C")),
             ],
             { concurrency: "unbounded" },
           );
           expect(operations).toHaveLength(4);
-          yield* runtime.awaitState("provider", "Active");
+          yield* runtime.awaitState(Provider, LifecycleState.Active);
           expect(yield* runtime.use(Provider, (service) => Effect.succeed(service.value))).toBe(
             "C",
           );
@@ -180,15 +180,15 @@ describe("DynamicRuntime replacement", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("provider", "Active");
-          yield* runtime.unregister("provider");
+          yield* runtime.awaitState(Provider, LifecycleState.Active);
+          yield* runtime.unregister(Provider);
           yield* Deferred.await(releaseStarted);
           const rejected = yield* Effect.exit(runtime.register(provider("new")));
           expect(Exit.hasFails(rejected)).toBe(true);
           yield* Deferred.succeed(releaseFinish, void 0);
           yield* runtime.awaitIdle();
           yield* runtime.register(provider("new"));
-          yield* runtime.awaitState("provider", "Active");
+          yield* runtime.awaitState(Provider, LifecycleState.Active);
         }),
       ),
     );
@@ -202,9 +202,9 @@ describe("DynamicRuntime replacement", () => {
           const right = yield* DynamicRuntime.make();
           yield* left.register(provider("left"));
           yield* right.register(provider("right"));
-          yield* left.awaitState("provider", "Active");
-          yield* right.awaitState("provider", "Active");
-          yield* left.disable("provider");
+          yield* left.awaitState(Provider, LifecycleState.Active);
+          yield* right.awaitState(Provider, LifecycleState.Active);
+          yield* left.disable(Provider);
           return yield* right.use(Provider, (service) => Effect.succeed(service.value));
         }),
       ),

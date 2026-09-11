@@ -26,7 +26,7 @@ lifecycle completion┘                         │
                                               └→ completion
 ```
 
-Controller принимает короткие согласованные решения, а не исполняет acquire/release/callback под глобальным lock. Поэтому disable можно применить во время незавершённого Starting. Потеря lifecycle completion недопустима; mailbox первого выпуска не вводит сложный backpressure и может расти, если производитель обгоняет controller. Snapshots — отдельный канал состояния, не аудиторский event log.
+Controller принимает короткие согласованные решения, а не исполняет acquire/release/callback под глобальным lock. Поэтому disable можно применить во время незавершённого Starting. Публичная команда несёт `Context` service key; controller сам разрешает его по authoritative map всех регистраций, включая Pending, Disabled и retiring, а не по Active publications и не по диагностическому node `id`. Так выбор provider и применение команды остаются одним сериализованным решением. Потеря lifecycle completion недопустима; mailbox первого выпуска не вводит сложный backpressure и может расти, если производитель обгоняет controller. Snapshots — отдельный канал состояния, не аудиторский event log.
 
 ## Граф владения
 
@@ -46,9 +46,9 @@ Required generations удерживаются потребителем с мом
 
 ## Публикация и отзыв
 
-Перед build фиксируются регистрация, recipe/activation/gate epoch и provider generation ids. Успешный output ещё не разрешает публикацию: controller повторно проверяет актуальность и наличие заявленного export key. Устаревший результат отправляется в cleanup, не в publications.
+Перед build фиксируются стабильная запись регистрации, recipe/activation/gate epoch и provider generation ids. Успешный output ещё не разрешает публикацию: controller повторно проверяет актуальность и наличие заявленного export key. Устаревший результат отправляется в cleanup, не в publications.
 
-Invalidation сначала атомарно удаляет публикации всей affected closure и закрывает admission. Затем прерываются/join-ятся managed calls и builders, закрываются consumers и лишь затем providers. Diamond-provider освобождается один раз после обоих consumers. Следующее поколение узла не запускается до конца cleanup предыдущего.
+Invalidation сначала атомарно удаляет публикации всей affected closure и закрывает admission. Затем прерываются/join-ятся managed calls и builders, закрываются consumers и лишь затем providers. Diamond-provider освобождается один раз после обоих consumers. Следующее поколение узла не запускается до конца cleanup предыдущего. Replacement меняет рецепт той же стабильной записи; unregister завершает её identity, поэтому ожидающий caller не может автоматически переключиться на более позднюю регистрацию того же service key.
 
 ## Почему не только ScopedRef / LayerMap
 

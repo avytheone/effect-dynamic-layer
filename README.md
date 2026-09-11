@@ -27,7 +27,7 @@ Lefthook проверяет staged-файлы Biome перед коммитом;
 
 ```ts
 import { Context, Effect } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "effect-dynamic-layer";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "effect-dynamic-layer";
 
 class Database extends Context.Service<Database, { readonly label: string }>()("app/Database") {}
 class Analytics extends Context.Service<Analytics, { readonly read: Effect.Effect<string> }>()(
@@ -50,18 +50,18 @@ const program = Effect.scoped(Effect.gen(function* () {
     requires: Requirement.empty,
     acquire: Effect.succeed({ label: "database #1" }),
   }));
-  yield* runtime.awaitState("analytics", "Active");
+  yield* runtime.awaitState(Analytics, LifecycleState.Active);
   yield* runtime.use(Analytics, (analytics) => analytics.read);
-  yield* runtime.disable("database");
-  yield* runtime.awaitState("database", "Disabled");
+  yield* runtime.disable(Database);
+  yield* runtime.awaitState(Database, LifecycleState.Disabled);
 }));
 
 await Effect.runPromise(program);
 ```
 
-`DynamicLayer.fromLayer(Service)({ id, requires, layer, when? })` принимает обычный Layer. `fromEffect` использует тот же lifecycle через `Layer.effect`: в Effect RC он уже обеспечивает Scope для acquisition. Обычный API не требует пользовательских casts.
+`DynamicLayer.fromLayer(Service)({ id, requires, layer, when? })` принимает обычный Layer. `fromEffect` использует тот же lifecycle через `Layer.effect`: в Effect RC он уже обеспечивает Scope для acquisition. `id` остаётся обязательным диагностическим metadata и отображается в snapshots; управляющие операции выбирают регистрацию не по нему, а по реальному `Context` service. Обычный API не требует пользовательских casts.
 
-`Requirement.empty`, `Requirement.service(Service)` и вложенный `Requirement.all(...)` описывают обязательные зависимости. Дополнительные зависимости ради lifecycle допустимы; пропуск внешнего требования реализации — ошибка компиляции. Зависимости, обеспеченные внутренним `Layer.provide`, повторно не объявляются. Несколько поставщиков одного runtime service key не допускаются, включая Disabled-провайдеров; используйте namespaced ключи.
+`Requirement.empty`, `Requirement.service(Service)` и вложенный `Requirement.all(...)` описывают обязательные зависимости. Дополнительные зависимости ради lifecycle допустимы; пропуск внешнего требования реализации — ошибка компиляции. Зависимости, обеспеченные внутренним `Layer.provide`, повторно не объявляются. Один service key может иметь только одного зарегистрированного provider, включая Pending, Disabled и завершающуюся регистрацию; используйте namespaced ключи.
 
 ## Основные гарантии договора
 
@@ -71,18 +71,20 @@ await Effect.runPromise(program);
 - Физическая остановка идёт от consumers к providers. Consumer finalizer может использовать старый provider до окончания своей cleanup-попытки.
 - Replacement — **stop-before-start** с промежутком недоступности; старый уже закрытый экземпляр не восстанавливается автоматически.
 - Независимые ветви не перезапускаются. Каждое поколение имеет свой Scope и свежий MemoMap; обычное sharing sublayers сохраняется внутри одного build.
-- Failed acquisition не запускает бесконечный retry. `retry(id)` явно разрешает новую попытку; для Active/Pending/Disabled это no-op. Новое поколение нужной зависимости, новый activation cycle или replace также разрешают попытку.
+- Failed acquisition не запускает бесконечный retry. `retry(Service)` явно разрешает новую попытку; для Active/Pending/Disabled это no-op. Новое поколение нужной зависимости, новый activation cycle или replace также разрешают попытку.
 - Shutdown идемпотентен и упорядочен; closing owning Scope вызывает его автоматически.
 
 Подробный договор и значения состояний — в [semantics.md](docs/semantics.md), ownership — в [architecture.md](docs/architecture.md). Уровень фактической проверки перечислен отдельно в [status.md](docs/status.md).
 
 ## Команды и ожидания
 
-`register`, `enable`, `disable`, `replace`, `unregister`, `retry` подтверждают принятие desired-state изменения. При invalidation это включает атомарное отозвание публикаций, **но не завершение acquisition/finalizers**. Для завершения используйте `awaitState(id, state)` и `awaitIdle()`.
+`register`, `enable(Service)`, `disable(Service)`, `replace(Service, description)`, `unregister(Service)` и `retry(Service)` подтверждают принятие desired-state изменения. Строковый `id` не является runtime target. Controller разрешает service key по полному реестру, включая Pending, Disabled и retiring-записи; отсутствие регистрации возвращает `ServiceNotRegistered { serviceKey }`, а управление ещё очищаемой регистрацией — `NodeRetiring`. При invalidation подтверждение включает атомарное отозвание публикаций, **но не завершение acquisition/finalizers**.
 
-`awaitIdle()` — барьер отсутствия незавершённых lifecycle-операций, управляемых calls и уже принятых необработанных изменений. Pending/Disabled/Failed допустимы; долгоживущие scoped workers сервисов и gate watchers сами по себе не мешают idle. Это не блокировка будущих изменений.
+`replace(Service, description)` типобезопасно требует описание того же service и сохраняет identity цели: обязательные metadata `id` и export key replacement должны соответствовать текущей регистрации. Замена остаётся stop-before-start и не создаёт второй provider.
 
-`awaitState` сначала проверяет искомое состояние. Failed вместо другого ожидаемого состояния завершает ожидание ошибкой; можно ждать сам Failed. Неизвестный/удалённый id и Closing/Closed — явные ошибки. Ожидания отменяются стандартными средствами Effect; timeout ограничивает ожидание, а не освобождает чужие ресурсы принудительно.
+Для завершения используйте `awaitState(Service, LifecycleState.Active)` (либо другую константу `LifecycleState`) и `awaitIdle()`. `awaitIdle()` — барьер отсутствия незавершённых lifecycle-операций, управляемых calls и уже принятых необработанных изменений. Pending/Disabled/Failed допустимы; долгоживущие scoped workers сервисов и gate watchers сами по себе не мешают idle. Это не блокировка будущих изменений.
+
+`awaitState` сначала выбирает стабильную запись регистрации и затем проверяет искомое состояние. Replacement продолжает ту же запись, поэтому ожидание не теряется; unregister с последующей новой регистрацией не перенаправляет старое ожидание. Failed вместо другого ожидаемого состояния завершает ожидание ошибкой; можно ждать сам `LifecycleState.Failed`. Удалённая или retiring-запись, которую уже нельзя дождаться, возвращает `AwaitStateUnavailable` с её диагностическим `id`; отсутствие service key — `ServiceNotRegistered`. Closing/Closed также завершаются явной ошибкой. Ожидания отменяются стандартными средствами Effect; timeout ограничивает ожидание, а не освобождает чужие ресурсы принудительно.
 
 `shutdown` намеренно выполняет непрерываемый ordered drain, как `Scope.close`: отмена caller или timeout не обрывают освобождение ресурсов посередине и не гарантируют немедленного возврата. Наблюдать удерживаемую ветку можно через snapshot, доступный и во время Closing. Это отличается от отменяемых `awaitState`/`awaitIdle`.
 

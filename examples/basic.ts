@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, SubscriptionRef } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 class Database extends Context.Service<Database, { readonly label: string }>()(
   "example/Database",
@@ -53,7 +53,7 @@ const program = Effect.scoped(
         }),
       }),
     );
-    yield* runtime.awaitState("analytics", "Pending");
+    yield* runtime.awaitState(Analytics, LifecycleState.Pending);
     yield* runtime.register(
       DynamicLayer.fromLayer(Database)({
         id: "database",
@@ -61,32 +61,32 @@ const program = Effect.scoped(
         layer: databaseLayer("A"),
       }),
     );
-    yield* runtime.awaitState("view-model", "Active");
+    yield* runtime.awaitState(ViewModel, LifecycleState.Active);
     yield* runtime.use(ViewModel, (service) => service.render.pipe(Effect.flatMap(Effect.log)));
 
     // Command completion includes revocation, not physical release completion.
-    yield* runtime.disable("database");
-    yield* runtime.awaitState("database", "Disabled");
-    yield* runtime.awaitState("analytics", "Pending");
-    yield* runtime.enable("database");
-    yield* runtime.awaitState("view-model", "Active");
+    yield* runtime.disable(Database);
+    yield* runtime.awaitState(Database, LifecycleState.Disabled);
+    yield* runtime.awaitState(Analytics, LifecycleState.Pending);
+    yield* runtime.enable(Database);
+    yield* runtime.awaitState(ViewModel, LifecycleState.Active);
 
     yield* runtime.replace(
-      "database",
+      Database,
       DynamicLayer.fromLayer(Database)({
         id: "database",
         requires: Requirement.empty,
         layer: databaseLayer("B"),
       }),
     );
-    yield* runtime.awaitState("view-model", "Active");
+    yield* runtime.awaitState(ViewModel, LifecycleState.Active);
     yield* runtime.use(ViewModel, (service) => service.render.pipe(Effect.flatMap(Effect.log)));
 
     // Ref writes and controller observations have separate acknowledgements.
     yield* SubscriptionRef.set(enabled, false);
-    yield* runtime.awaitState("analytics", "Pending");
+    yield* runtime.awaitState(Analytics, LifecycleState.Pending);
     yield* SubscriptionRef.set(enabled, true);
-    yield* runtime.awaitState("view-model", "Active");
+    yield* runtime.awaitState(ViewModel, LifecycleState.Active);
     yield* runtime.awaitIdle();
     // Closing this owning Scope performs ordered shutdown automatically.
   }),

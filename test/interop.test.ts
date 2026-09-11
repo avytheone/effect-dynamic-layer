@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Exit, Layer } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement, type RuntimeSnapshot } from "../src/index.js";
+import {
+  DynamicLayer,
+  DynamicRuntime,
+  LifecycleState,
+  Requirement,
+  type RuntimeSnapshot,
+} from "../src/index.js";
 
 const Database = Context.Service<{ readonly generation: number }>("test/interop/Database");
 const Analytics = Context.Service<{ readonly generation: number }>("test/interop/Analytics");
@@ -61,13 +67,13 @@ describe("DynamicRuntime Layer and graph interop", () => {
               layer: whole,
             }),
           );
-          yield* runtime.awaitState("whole-layer", "Active");
+          yield* runtime.awaitState(Left, LifecycleState.Active);
           expect(yield* runtime.use(Left, (service) => Effect.succeed(service.value))).toBe(1);
           expect(sharedAcquisitions).toBe(1);
           expect(leftAcquisitions).toBe(1);
           expect(rightAcquisitions).toBe(1);
 
-          yield* runtime.disable("whole-layer");
+          yield* runtime.disable(Left);
           yield* runtime.awaitIdle();
           expect(sharedReleases).toBe(1);
         }),
@@ -92,7 +98,7 @@ describe("DynamicRuntime Layer and graph interop", () => {
         Effect.gen(function* () {
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(provider());
-          yield* runtime.awaitState("database", "Active");
+          yield* runtime.awaitState(Database, LifecycleState.Active);
           yield* runtime.register(
             DynamicLayer.fromEffect(Analytics)({
               id: "analytics",
@@ -106,7 +112,7 @@ describe("DynamicRuntime Layer and graph interop", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("analytics", "Failed");
+          yield* runtime.awaitState(Analytics, LifecycleState.Failed);
           expect(consumerAttempts).toBe(1);
 
           yield* runtime.register(
@@ -116,15 +122,15 @@ describe("DynamicRuntime Layer and graph interop", () => {
               acquire: Effect.succeed({ value: 1 }),
             }),
           );
-          yield* runtime.awaitState("unrelated", "Active");
-          yield* runtime.disable("unrelated");
-          yield* runtime.awaitState("unrelated", "Disabled");
+          yield* runtime.awaitState(Unrelated, LifecycleState.Active);
+          yield* runtime.disable(Unrelated);
+          yield* runtime.awaitState(Unrelated, LifecycleState.Disabled);
           yield* runtime.awaitIdle();
           expect(consumerAttempts).toBe(1);
           expect(node(yield* runtime.snapshot, "analytics").state._tag).toBe("Failed");
 
-          yield* runtime.replace("database", provider());
-          yield* runtime.awaitState("analytics", "Active");
+          yield* runtime.replace(Database, provider());
+          yield* runtime.awaitState(Analytics, LifecycleState.Active);
           expect(consumerAttempts).toBe(2);
           expect(
             yield* runtime.use(Analytics, (service) => Effect.succeed(service.generation)),
@@ -196,9 +202,9 @@ describe("DynamicRuntime Layer and graph interop", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("view", "Active");
+          yield* runtime.awaitState(View, LifecycleState.Active);
 
-          yield* runtime.disable("database");
+          yield* runtime.disable(Database);
           const databaseUse = yield* Effect.exit(
             runtime.use(Database, () => Effect.succeed("database")),
           );

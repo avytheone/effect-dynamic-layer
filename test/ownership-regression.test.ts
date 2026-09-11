@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Exit, Fiber, References, type Scope, Stream } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement, safeSummary } from "../src/index.js";
+import {
+  DynamicLayer,
+  DynamicRuntime,
+  LifecycleState,
+  Requirement,
+  safeSummary,
+} from "../src/index.js";
 
 const Service = Context.Service<{ readonly value: number }>("test/ownership-regression/Service");
 const ShutdownService = Context.Service<{ readonly value: number }>(
@@ -38,7 +44,7 @@ describe("DynamicRuntime ownership regressions", () => {
               }),
             ),
           );
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
 
           const startAdmittedCallback = yield* Deferred.make<void>();
           let observedManagedCalls = 0;
@@ -126,7 +132,7 @@ describe("DynamicRuntime ownership regressions", () => {
           expect(afterCancellation.liveGenerations).toBe(1);
           expect(childLive).toBe(0);
 
-          yield* runtime.disable("service");
+          yield* runtime.disable(Service);
           yield* runtime.awaitIdle();
           expect(providerReleases).toBe(1);
           expect((yield* runtime.snapshot).liveGenerations).toBe(0);
@@ -153,7 +159,7 @@ describe("DynamicRuntime ownership regressions", () => {
               }),
             ),
           );
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
 
           const useExit = yield* Effect.exit(
             runtime.use(Service, (): Effect.Effect<never> => {
@@ -164,7 +170,7 @@ describe("DynamicRuntime ownership regressions", () => {
 
           yield* runtime.awaitIdle();
           expect((yield* runtime.snapshot).managedCalls).toBe(0);
-          yield* runtime.disable("service");
+          yield* runtime.disable(Service);
           yield* runtime.awaitIdle();
           expect(releases).toBe(1);
           yield* runtime.shutdown;
@@ -202,7 +208,7 @@ describe("DynamicRuntime ownership regressions", () => {
                 }),
               ),
             );
-            yield* runtime.awaitState("service", "Active");
+            yield* runtime.awaitState(Service, LifecycleState.Active);
 
             const useExit = yield* Effect.exit(
               runtime.use(Service, () =>
@@ -214,7 +220,7 @@ describe("DynamicRuntime ownership regressions", () => {
             );
             useSawDefect = Exit.hasDies(useExit);
 
-            yield* runtime.awaitState("service", "Failed");
+            yield* runtime.awaitState(Service, LifecycleState.Failed);
             const beforeShutdown = yield* runtime.snapshot;
             managedCalls = beforeShutdown.managedCalls;
             const serviceState = beforeShutdown.nodes.find((node) => node.id === "service")?.state;
@@ -296,15 +302,15 @@ describe("DynamicRuntime ownership regressions", () => {
             }),
           );
 
-          yield* runtime.awaitState("disabled-worker", "Active");
-          yield* runtime.awaitState("shutdown-worker", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
+          yield* runtime.awaitState(ShutdownService, LifecycleState.Active);
           yield* Deferred.await(disabledWorkerStarted);
           yield* Deferred.await(shutdownWorkerStarted);
           expect(yield* Deferred.isDone(disabledWorkerStopped)).toBe(false);
           expect(yield* Deferred.isDone(shutdownWorkerStopped)).toBe(false);
 
-          yield* runtime.disable("disabled-worker");
-          yield* runtime.awaitState("disabled-worker", "Disabled");
+          yield* runtime.disable(Service);
+          yield* runtime.awaitState(Service, LifecycleState.Disabled);
           yield* Deferred.await(disabledWorkerStopped);
           expect(events.slice(0, 2)).toEqual(["disabled:worker-stopped", "disabled:release"]);
           expect(yield* Deferred.isDone(shutdownWorkerStopped)).toBe(false);
@@ -332,14 +338,14 @@ describe("DynamicRuntime ownership regressions", () => {
         Effect.gen(function* () {
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(service(Effect.succeed({ value: 1 })));
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
 
           const requests: Array<Fiber.Fiber<void, never>> = [];
           for (let index = 0; index < 16; index++) {
             const request = Effect.all(
               [
                 Effect.exit(runtime.use(Service, () => Effect.void)),
-                Effect.exit(runtime.awaitState("service", "Active")),
+                Effect.exit(runtime.awaitState(Service, LifecycleState.Active)),
                 Effect.exit(runtime.awaitIdle()),
               ],
               { concurrency: "unbounded" },

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Exit, Fiber } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 const Service = Context.Service<{ readonly generation: number }>("test/use/Service");
 const Caller = Context.Service<{ readonly label: string }>("test/use/Caller");
@@ -37,7 +37,7 @@ describe("DynamicRuntime managed use", () => {
         Effect.gen(function* () {
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(description(1));
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
           const call = yield* Effect.forkChild(
             runtime.use(Service, (service) =>
               Effect.gen(function* () {
@@ -52,12 +52,12 @@ describe("DynamicRuntime managed use", () => {
             ),
           );
           yield* Deferred.await(started);
-          yield* runtime.replace("service", description(2));
+          yield* runtime.replace(Service, description(2));
           const afterAck = yield* Effect.exit(runtime.use(Service, () => Effect.succeed(0)));
           expect(Exit.hasFails(afterAck)).toBe(true);
           yield* Deferred.await(cleaned);
           expect(Exit.hasInterrupts(yield* Fiber.await(call))).toBe(true);
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
           expect(yield* runtime.use(Service, (service) => Effect.succeed(service.generation))).toBe(
             2,
           );
@@ -75,7 +75,7 @@ describe("DynamicRuntime managed use", () => {
         Effect.gen(function* () {
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(description(1));
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
           const call = yield* Effect.forkChild(
             runtime.use(Service, () =>
               Effect.gen(function* () {
@@ -101,7 +101,7 @@ describe("DynamicRuntime managed use", () => {
         Effect.gen(function* () {
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(description(1));
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
           return yield* runtime.use(Service, () =>
             Effect.gen(function* () {
               const caller = yield* Caller;
@@ -140,7 +140,7 @@ describe("DynamicRuntime managed use", () => {
               }),
             }),
           );
-          yield* runtime.awaitState("service", "Active");
+          yield* runtime.awaitState(Service, LifecycleState.Active);
           yield* runtime.use(Service, () =>
             Effect.gen(function* () {
               yield* Effect.forkScoped(
@@ -154,7 +154,7 @@ describe("DynamicRuntime managed use", () => {
           );
           yield* Deferred.await(childStopped);
           expect(providerReleased).toBe(false);
-          yield* runtime.disable("service");
+          yield* runtime.disable(Service);
           yield* runtime.awaitIdle();
           expect(providerReleased).toBe(true);
         }),

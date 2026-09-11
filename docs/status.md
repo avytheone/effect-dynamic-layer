@@ -1,6 +1,6 @@
 # Статус experimental 0.1.0
 
-Библиотека реализована и проверена локально. Публикация npm, deployment и production-интеграции не выполнялись. Исходный договор — `HANDOFF-dynamic-layer.md`; явные уточнения владельца: **Effect RC и Bun** вместо baseline v3/pnpm/Vitest.
+Библиотека реализована и проверена локально, включая одобренный clean cutover управления на `Context` services и `LifecycleState`. Публикация npm, deployment и production-интеграции не выполнялись. Исходный договор — `HANDOFF-dynamic-layer.md`; явные уточнения владельца: **Effect RC и Bun** вместо baseline v3/pnpm/Vitest.
 
 ## Точные версии
 
@@ -18,18 +18,22 @@ Effect не встроен в bundle. Peer-диапазон точно огра�
 
 ## Итоговые команды и фактические результаты
 
+После чистого перехода со строковых node ids на service Tags все проверки выполнены повторно. Предыдущая baseline: 63 теста / 208 assertions; текущий результат включает пять дополнительных поведенческих регрессий управления по Tag.
+
 | Команда | Результат |
 |---|---|
 | `bun install --frozen-lockfile` | Успешно; 12 установок / 47 пакетов, lockfile без изменений, hooks установлены |
-| `bun test` | **63 passed, 0 failed, 208 assertions, 10 файлов**, 277 ms |
+| `bun test` | **68 passed, 0 failed, 231 assertions, 11 файлов**, 299 ms |
 | `bun run typecheck` | Успешно: core, runtime-тесты, examples и package-check script |
 | `bun run test:types` | Успешно: положительные и отрицательные generic-контракты действительно проверены TypeScript |
-| `bun run lint` | Успешно: Biome проверил 28 файлов, без исправлений |
-| `bun run build` | Успешно: Bun ESM bundle, 8 собственных модулей, 51.40 KB; declarations выпущены TypeScript |
-| `bun run test:package` | Успешно на финальной сборке: tarball из 28 файлов (код, declarations, документация), внешний install, strict consumer typecheck, отрицательные внутренние импорты и lifecycle execution |
+| `bun run lint` | Успешно: Biome проверил 29 файлов, без исправлений |
+| `bun run build` | Успешно: Bun ESM bundle, 8 собственных модулей, 52.42 KB; declarations выпущены TypeScript |
+| `bun run test:package` | Успешно: внешний consumer реального tarball импортирует `LifecycleState`, выполняет Tag-based Active → disable → Disabled → enable → Active; strict typecheck и отрицательные внутренние импорты проходят |
 | `bun run examples` | Все три примера завершились: basic, effect-factory, failure-and-retry |
 
 Сборка: `--target browser --format esm --external effect`. Это проверенный способ получения ESM без platform API в core, **не заявление о browser runtime compatibility**.
+
+Дополнительные регрессии в `test/tag-control.test.ts` проверяют несовпадающие node id и service key, управление Pending/Disabled, различие отсутствующей и retiring-регистрации, атомарное отклонение несовместимой замены и lifetime ожидания при replace/unregister/re-register. `test-d/api.test-d.ts` отвергает строковые targets для всех шести операций, неизвестное состояние и несовместимый replacement. Строковые перегрузки, `UnknownNode` и `StateTag` удалены; `id` остаётся в описаниях и диагностике.
 
 ## Этапы реализации
 
@@ -45,7 +49,7 @@ Effect не встроен в bundle. Peer-диапазон точно огра�
 
 ## Матрица обязательных T01–T40
 
-Файлы указаны относительно корня репозитория. Сценарии могут иметь несколько доказательств; номера в названиях тестов позволяют найти конкретный случай. Type-tests не входят в число 63 runtime-тестов.
+Файлы указаны относительно корня репозитория. Сценарии могут иметь несколько доказательств; номера в названиях тестов позволяют найти конкретный случай. Type-tests не входят в число 68 runtime-тестов.
 
 | ID | Проверенное поведение | Доказательство |
 |---|---|---|
@@ -106,6 +110,7 @@ Effect не встроен в bundle. Peer-диапазон точно огра�
 ## Уточнения API и честные ограничения
 
 - Effect RC: `Context.Service`, scoped `Layer.effect`, `Layer.unwrap`, fiber-local `Context.Reference`; v3 `Context.Tag` / `Layer.scoped` / `Layer.unwrapEffect` не смешиваются с RC API.
+- Одобрен clean cutover: `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` принимают `Context` service, без строковых overloads и aliases. `LifecycleState` экспортируется для ожиданий; node `id` остаётся диагностическим metadata snapshots.
 - `shutdown` — непрерываемый ordered drain. Timeout/cancellation не отрывают cleanup и не обещают немедленного возврата. `awaitState`/`awaitIdle` отменяемы, snapshot доступен в Closing и terminal state.
 - Составной Cause с Die+Fail/Interrupt или несколькими Die консервативно считается потенциальной ошибкой rollback и блокирует restart. Это безопасно, но составная acquisition-only ошибка тоже иногда требует нового runtime. См. ADR 0002.
 - `retry` вне non-quarantined Failed — no-op. `awaitIdle` также ждёт managed calls, но не фоновые scoped workers сервиса или gate watchers.

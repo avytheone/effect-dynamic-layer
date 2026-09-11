@@ -24,9 +24,9 @@ import {
   ReplaceMismatch,
   RuntimeClosed,
   RuntimeClosing,
+  ServiceNotRegistered,
   ServiceUnavailable,
   ShutdownFailed,
-  UnknownNode,
   type UseError,
 } from "./Errors.js";
 import {
@@ -44,6 +44,7 @@ import {
 } from "./internal/graph.js";
 import type {
   FailureDiagnostic,
+  LifecycleState,
   NodeSnapshot,
   NodeState,
   PendingReason,
@@ -52,8 +53,6 @@ import type {
   RuntimeSnapshot,
   RuntimeState,
 } from "./Snapshot.js";
-
-export type StateTag = NodeState["_tag"];
 
 type Reply =
   | { readonly _tag: "Success"; readonly value: unknown }
@@ -69,21 +68,21 @@ type Command =
     }
   | {
       readonly _tag: "Replace";
-      readonly id: string;
+      readonly serviceKey: string;
       readonly description: ErasedDescription;
       readonly reply: ReplyDeferred;
     }
   | {
       readonly _tag: "Enable" | "Disable" | "Retry" | "Unregister";
-      readonly id: string;
+      readonly serviceKey: string;
       readonly reply: ReplyDeferred;
     }
   | { readonly _tag: "Snapshot"; readonly reply: ReplyDeferred }
   | { readonly _tag: "Shutdown"; readonly reply: ReplyDeferred }
   | {
       readonly _tag: "AwaitState";
-      readonly id: string;
-      readonly expected: StateTag;
+      readonly serviceKey: string;
+      readonly expected: LifecycleState;
       readonly waiterId: number;
       readonly reply: ReplyDeferred;
     }
@@ -125,7 +124,7 @@ type Command =
       readonly exit: Exit.Exit<void, unknown>;
     };
 
-type NodePhase = StateTag;
+type NodePhase = LifecycleState;
 
 type NodeRecord = {
   description: ErasedDescription;
@@ -187,8 +186,9 @@ type ManagedCall = {
 
 type StateWaiter = {
   readonly _tag: "State";
+  readonly node: NodeRecord;
   readonly id: string;
-  readonly expected: StateTag;
+  readonly expected: LifecycleState;
   readonly reply: ReplyDeferred;
 };
 
@@ -636,8 +636,8 @@ class RuntimeController {
           }
           continue;
         }
-        const node = this.nodes.get(waiter.id);
-        if (node === undefined || node.retiring) {
+        const node = waiter.node;
+        if (this.nodes.get(waiter.id) !== node || node.retiring) {
           this.waiters.delete(waiterId);
           yield* complete(
             waiter.reply,
@@ -764,29 +764,30 @@ class RuntimeController {
   }
 
   handleReplace(
-    id: string,
+    serviceKey: string,
     description: ErasedDescription,
     reply: ReplyDeferred,
   ): Effect.Effect<void> {
     return Effect.gen(this, function* () {
       if (yield* this.rejectWhenClosing(reply)) return;
-      const node = this.nodes.get(id);
+      const node = this.nodeByExport(serviceKey);
       if (node === undefined) {
-        yield* complete(reply, failure(new UnknownNode({ id })));
+        yield* complete(reply, failure(new ServiceNotRegistered({ serviceKey })));
         return;
       }
+      const id = node.description.id;
       if (node.retiring) {
-        yield* complete(reply, failure(new NodeRetiring({ id })));
+        yield* complete(reply, failure(new NodeRetiring({ id, exportKey: serviceKey })));
         return;
       }
-      if (description.id !== id || description.exportKey !== node.description.exportKey) {
+      if (description.id !== id || description.exportKey !== serviceKey) {
         yield* complete(
           reply,
           failure(
             new ReplaceMismatch({
               id,
               descriptionId: description.id,
-              currentExportKey: node.description.exportKey,
+              currentExportKey: serviceKey,
               replacementExportKey: description.exportKey,
             }),
           ),
@@ -826,16 +827,17 @@ class RuntimeController {
     });
   }
 
-  handleToggle(id: string, enabled: boolean, reply: ReplyDeferred): Effect.Effect<void> {
+  handleToggle(serviceKey: string, enabled: boolean, reply: ReplyDeferred): Effect.Effect<void> {
     return Effect.gen(this, function* () {
       if (yield* this.rejectWhenClosing(reply)) return;
-      const node = this.nodes.get(id);
+      const node = this.nodeByExport(serviceKey);
       if (node === undefined) {
-        yield* complete(reply, failure(new UnknownNode({ id })));
+        yield* complete(reply, failure(new ServiceNotRegistered({ serviceKey })));
         return;
       }
+      const id = node.description.id;
       if (node.retiring) {
-        yield* complete(reply, failure(new NodeRetiring({ id })));
+        yield* complete(reply, failure(new NodeRetiring({ id, exportKey: serviceKey })));
         return;
       }
       if (node.desiredEnabled === enabled) {
@@ -855,16 +857,17 @@ class RuntimeController {
     });
   }
 
-  handleRetry(id: string, reply: ReplyDeferred): Effect.Effect<void> {
+  handleRetry(serviceKey: string, reply: ReplyDeferred): Effect.Effect<void> {
     return Effect.gen(this, function* () {
       if (yield* this.rejectWhenClosing(reply)) return;
-      const node = this.nodes.get(id);
+      const node = this.nodeByExport(serviceKey);
       if (node === undefined) {
-        yield* complete(reply, failure(new UnknownNode({ id })));
+        yield* complete(reply, failure(new ServiceNotRegistered({ serviceKey })));
         return;
       }
+      const id = node.description.id;
       if (node.retiring) {
-        yield* complete(reply, failure(new NodeRetiring({ id })));
+        yield* complete(reply, failure(new NodeRetiring({ id, exportKey: serviceKey })));
         return;
       }
       if (node.phase === "Failed" && !node.quarantined) {
@@ -877,16 +880,17 @@ class RuntimeController {
     });
   }
 
-  handleUnregister(id: string, reply: ReplyDeferred): Effect.Effect<void> {
+  handleUnregister(serviceKey: string, reply: ReplyDeferred): Effect.Effect<void> {
     return Effect.gen(this, function* () {
       if (yield* this.rejectWhenClosing(reply)) return;
-      const node = this.nodes.get(id);
+      const node = this.nodeByExport(serviceKey);
       if (node === undefined) {
-        yield* complete(reply, failure(new UnknownNode({ id })));
+        yield* complete(reply, failure(new ServiceNotRegistered({ serviceKey })));
         return;
       }
+      const id = node.description.id;
       if (node.retiring) {
-        yield* complete(reply, failure(new NodeRetiring({ id })));
+        yield* complete(reply, failure(new NodeRetiring({ id, exportKey: serviceKey })));
         return;
       }
       const oldGraph = this.graph();
@@ -1209,15 +1213,15 @@ class RuntimeController {
       case "Register":
         return this.handleRegister(command.description, command.reply);
       case "Replace":
-        return this.handleReplace(command.id, command.description, command.reply);
+        return this.handleReplace(command.serviceKey, command.description, command.reply);
       case "Enable":
-        return this.handleToggle(command.id, true, command.reply);
+        return this.handleToggle(command.serviceKey, true, command.reply);
       case "Disable":
-        return this.handleToggle(command.id, false, command.reply);
+        return this.handleToggle(command.serviceKey, false, command.reply);
       case "Retry":
-        return this.handleRetry(command.id, command.reply);
+        return this.handleRetry(command.serviceKey, command.reply);
       case "Unregister":
-        return this.handleUnregister(command.id, command.reply);
+        return this.handleUnregister(command.serviceKey, command.reply);
       case "Snapshot":
         return complete(command.reply, success(this.lastSnapshot));
       case "Shutdown":
@@ -1253,12 +1257,23 @@ class RuntimeController {
       case "AwaitState": {
         if (this.runtimeState !== "Running")
           return complete(command.reply, failure(this.currentUnavailable()));
-        const node = this.nodes.get(command.id);
-        if (node === undefined || node.retiring)
-          return complete(command.reply, failure(new UnknownNode({ id: command.id })));
+        const node = this.nodeByExport(command.serviceKey);
+        if (node === undefined)
+          return complete(
+            command.reply,
+            failure(new ServiceNotRegistered({ serviceKey: command.serviceKey })),
+          );
+        if (node.retiring)
+          return complete(
+            command.reply,
+            failure(
+              new AwaitStateUnavailable({ id: node.description.id, expected: command.expected }),
+            ),
+          );
         this.waiters.set(command.waiterId, {
           _tag: "State",
-          id: command.id,
+          node,
+          id: node.description.id,
           expected: command.expected,
           reply: command.reply,
         });
@@ -1292,15 +1307,18 @@ export interface DynamicRuntime {
   register<ROut, E, RIn>(
     description: DynamicLayerModel.DynamicLayer<ROut, E, RIn>,
   ): Effect.Effect<void, CommandError>;
-  replace<ROut, E, RIn>(
-    id: string,
-    description: DynamicLayerModel.DynamicLayer<ROut, E, RIn>,
+  replace<I, S, E, RIn>(
+    service: Context.Key<I, S>,
+    description: DynamicLayerModel.DynamicLayer<NoInfer<I>, E, RIn>,
   ): Effect.Effect<void, CommandError>;
-  enable(id: string): Effect.Effect<void, CommandError>;
-  disable(id: string): Effect.Effect<void, CommandError>;
-  unregister(id: string): Effect.Effect<void, CommandError>;
-  retry(id: string): Effect.Effect<void, CommandError>;
-  awaitState(id: string, state: StateTag): Effect.Effect<void, AwaitError>;
+  enable<I, S>(service: Context.Key<I, S>): Effect.Effect<void, CommandError>;
+  disable<I, S>(service: Context.Key<I, S>): Effect.Effect<void, CommandError>;
+  unregister<I, S>(service: Context.Key<I, S>): Effect.Effect<void, CommandError>;
+  retry<I, S>(service: Context.Key<I, S>): Effect.Effect<void, CommandError>;
+  awaitState<I, S>(
+    service: Context.Key<I, S>,
+    state: LifecycleState,
+  ): Effect.Effect<void, AwaitError>;
   awaitIdle(): Effect.Effect<void, RuntimeClosing | RuntimeClosed>;
   use<I, S, A, E, R>(
     service: Context.Key<I, S>,
@@ -1433,43 +1451,45 @@ const makeRuntime = Effect.uninterruptible(
           description: eraseDescription(description),
           reply,
         })) as Effect.Effect<void, CommandError>,
-      replace: (id, description) =>
+      replace: (service, description) =>
         controller.publicRequest<void>((reply) => ({
           _tag: "Replace",
-          id,
+          serviceKey: service.key,
           description: eraseDescription(description),
           reply,
         })) as Effect.Effect<void, CommandError>,
-      enable: (id) =>
-        controller.publicRequest<void>((reply) => ({ _tag: "Enable", id, reply })) as Effect.Effect<
-          void,
-          CommandError
-        >,
-      disable: (id) =>
+      enable: (service) =>
+        controller.publicRequest<void>((reply) => ({
+          _tag: "Enable",
+          serviceKey: service.key,
+          reply,
+        })) as Effect.Effect<void, CommandError>,
+      disable: (service) =>
         controller.publicRequest<void>((reply) => ({
           _tag: "Disable",
-          id,
+          serviceKey: service.key,
           reply,
         })) as Effect.Effect<void, CommandError>,
-      unregister: (id) =>
+      unregister: (service) =>
         controller.publicRequest<void>((reply) => ({
           _tag: "Unregister",
-          id,
+          serviceKey: service.key,
           reply,
         })) as Effect.Effect<void, CommandError>,
-      retry: (id) =>
-        controller.publicRequest<void>((reply) => ({ _tag: "Retry", id, reply })) as Effect.Effect<
-          void,
-          CommandError
-        >,
-      awaitState: (id, state) =>
+      retry: (service) =>
+        controller.publicRequest<void>((reply) => ({
+          _tag: "Retry",
+          serviceKey: service.key,
+          reply,
+        })) as Effect.Effect<void, CommandError>,
+      awaitState: (service, state) =>
         Effect.suspend(() => {
           if (controller.runtimeState !== "Running")
             return Effect.fail(controller.currentUnavailable());
           const waiterId = controller.nextWaiterId++;
           return awaitWithCancellation<void>(controller, waiterId, (reply) => ({
             _tag: "AwaitState",
-            id,
+            serviceKey: service.key,
             expected: state,
             waiterId,
             reply,

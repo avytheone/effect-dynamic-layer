@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Exit, Fiber, type Scope, SubscriptionRef } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 const Resource = Context.Service<{ readonly generation: number }>("test/shutdown/Resource");
 
@@ -24,14 +24,14 @@ describe("DynamicRuntime shutdown", () => {
               }),
             ),
           );
-          yield* runtime.awaitState("resource", "Active");
-          yield* runtime.enable("resource");
-          yield* runtime.disable("resource");
-          yield* runtime.disable("resource");
-          yield* runtime.awaitState("resource", "Disabled");
-          yield* runtime.enable("resource");
-          yield* runtime.enable("resource");
-          yield* runtime.awaitState("resource", "Active");
+          yield* runtime.awaitState(Resource, LifecycleState.Active);
+          yield* runtime.enable(Resource);
+          yield* runtime.disable(Resource);
+          yield* runtime.disable(Resource);
+          yield* runtime.awaitState(Resource, LifecycleState.Disabled);
+          yield* runtime.enable(Resource);
+          yield* runtime.enable(Resource);
+          yield* runtime.awaitState(Resource, LifecycleState.Active);
           yield* runtime.shutdown;
           yield* runtime.shutdown;
         }),
@@ -91,14 +91,14 @@ describe("DynamicRuntime shutdown", () => {
             );
           for (let cycle = 0; cycle < 100; cycle++) {
             yield* runtime.register(makeResource());
-            yield* runtime.awaitState("resource", "Active");
-            yield* runtime.replace("resource", makeResource());
-            yield* runtime.awaitState("resource", "Active");
-            yield* runtime.disable("resource");
-            yield* runtime.awaitState("resource", "Disabled");
-            yield* runtime.enable("resource");
-            yield* runtime.awaitState("resource", "Active");
-            yield* runtime.unregister("resource");
+            yield* runtime.awaitState(Resource, LifecycleState.Active);
+            yield* runtime.replace(Resource, makeResource());
+            yield* runtime.awaitState(Resource, LifecycleState.Active);
+            yield* runtime.disable(Resource);
+            yield* runtime.awaitState(Resource, LifecycleState.Disabled);
+            yield* runtime.enable(Resource);
+            yield* runtime.awaitState(Resource, LifecycleState.Active);
+            yield* runtime.unregister(Resource);
             yield* runtime.awaitIdle();
           }
           yield* runtime.shutdown;
@@ -123,15 +123,17 @@ describe("DynamicRuntime shutdown", () => {
           yield* runtime.register(
             resource(Deferred.await(blocker).pipe(Effect.as({ generation: 1 }))),
           );
-          const reusable = runtime.awaitState("resource", "Active");
+          const reusable = runtime.awaitState(Resource, LifecycleState.Active);
           const first = yield* Effect.forkChild(reusable);
           const second = yield* Effect.forkChild(reusable);
           yield* Fiber.interrupt(first);
           yield* Deferred.succeed(blocker, void 0);
           yield* Fiber.join(second);
           yield* runtime.awaitIdle();
-          const removedWait = yield* Effect.forkChild(runtime.awaitState("resource", "Disabled"));
-          yield* runtime.unregister("resource");
+          const removedWait = yield* Effect.forkChild(
+            runtime.awaitState(Resource, LifecycleState.Disabled),
+          );
+          yield* runtime.unregister(Resource);
           expect(Exit.hasFails(yield* Fiber.await(removedWait))).toBe(true);
           yield* runtime.awaitIdle();
           const closedWait = runtime.awaitIdle();
@@ -176,7 +178,7 @@ describe("DynamicRuntime shutdown", () => {
               }),
             ),
           );
-          yield* runtime.awaitState("resource", "Active");
+          yield* runtime.awaitState(Resource, LifecycleState.Active);
           const shuttingDown = yield* Effect.forkChild(runtime.shutdown);
           yield* Deferred.await(finalizerStarted);
           const interrupting = yield* Effect.forkChild(Fiber.interrupt(shuttingDown));

@@ -1,6 +1,6 @@
 import { type Cause, Data } from "effect";
 import type { GraphValidationError } from "./internal/graph.js";
-import type { FailureDiagnostic, RuntimeState } from "./Snapshot.js";
+import type { FailureDiagnostic, LifecycleState, RuntimeState } from "./Snapshot.js";
 
 export class RuntimeClosing extends Data.TaggedError("RuntimeClosing")<{
   readonly state: "Closing";
@@ -10,8 +10,8 @@ export class RuntimeClosed extends Data.TaggedError("RuntimeClosed")<{
   readonly state: "Closed" | "CloseFailed";
 }> {}
 
-export class UnknownNode extends Data.TaggedError("UnknownNode")<{
-  readonly id: string;
+export class ServiceNotRegistered extends Data.TaggedError("ServiceNotRegistered")<{
+  readonly serviceKey: string;
 }> {}
 
 export class NodeRetiring extends Data.TaggedError("NodeRetiring")<{
@@ -36,13 +36,13 @@ export class ServiceUnavailable extends Data.TaggedError("ServiceUnavailable")<{
 
 export class AwaitStateFailed extends Data.TaggedError("AwaitStateFailed")<{
   readonly id: string;
-  readonly expected: string;
+  readonly expected: LifecycleState;
   readonly failure: FailureDiagnostic;
 }> {}
 
 export class AwaitStateUnavailable extends Data.TaggedError("AwaitStateUnavailable")<{
   readonly id: string;
-  readonly expected: string;
+  readonly expected: LifecycleState;
 }> {}
 
 export class InvalidExport extends Data.TaggedError("InvalidExport")<{
@@ -57,7 +57,7 @@ export class ShutdownFailed extends Data.TaggedError("ShutdownFailed")<{
 export type CommandError =
   | RuntimeClosing
   | RuntimeClosed
-  | UnknownNode
+  | ServiceNotRegistered
   | NodeRetiring
   | GraphRejected
   | ReplaceMismatch;
@@ -65,7 +65,7 @@ export type CommandError =
 export type AwaitError =
   | RuntimeClosing
   | RuntimeClosed
-  | UnknownNode
+  | ServiceNotRegistered
   | AwaitStateFailed
   | AwaitStateUnavailable;
 

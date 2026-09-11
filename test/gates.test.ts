@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Context, Deferred, Effect, Fiber, SubscriptionRef } from "effect";
-import { DynamicLayer, DynamicRuntime, Requirement } from "../src/index.js";
+import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "../src/index.js";
 
 const Gated = Context.Service<{ readonly generation: number }>("test/gates/Gated");
 
@@ -24,7 +24,7 @@ describe("DynamicRuntime gates", () => {
               Effect.sync(() => ({ generation: ++acquisitions })),
             ),
           );
-          yield* runtime.awaitState("gated", "Pending");
+          yield* runtime.awaitState(Gated, LifecycleState.Pending);
           expect(acquisitions).toBe(0);
         }),
       ),
@@ -44,14 +44,14 @@ describe("DynamicRuntime gates", () => {
               Effect.sync(() => ({ generation: ++acquisitions })),
             ),
           );
-          yield* runtime.awaitState("gated", "Active");
+          yield* runtime.awaitState(Gated, LifecycleState.Active);
           yield* SubscriptionRef.set(gate, true);
           yield* runtime.awaitIdle();
           expect(acquisitions).toBe(1);
           yield* SubscriptionRef.set(gate, false);
-          yield* runtime.awaitState("gated", "Pending");
+          yield* runtime.awaitState(Gated, LifecycleState.Pending);
           yield* SubscriptionRef.set(gate, true);
-          yield* runtime.awaitState("gated", "Active");
+          yield* runtime.awaitState(Gated, LifecycleState.Active);
           expect(acquisitions).toBe(2);
         }),
       ),
@@ -65,11 +65,11 @@ describe("DynamicRuntime gates", () => {
           const gate = yield* SubscriptionRef.make(true);
           const runtime = yield* DynamicRuntime.make();
           yield* runtime.register(recipe(gate, Effect.succeed({ generation: 1 })));
-          yield* runtime.awaitState("gated", "Active");
-          yield* runtime.disable("gated");
-          yield* runtime.awaitState("gated", "Disabled");
+          yield* runtime.awaitState(Gated, LifecycleState.Active);
+          yield* runtime.disable(Gated);
+          yield* runtime.awaitState(Gated, LifecycleState.Disabled);
           expect((yield* runtime.snapshot).gateWatchers).toBe(1);
-          yield* runtime.unregister("gated");
+          yield* runtime.unregister(Gated);
           yield* runtime.awaitIdle();
           expect((yield* runtime.snapshot).gateWatchers).toBe(0);
         }),
@@ -88,7 +88,7 @@ describe("DynamicRuntime gates", () => {
           );
           yield* SubscriptionRef.set(gate, true);
           yield* Fiber.join(registering);
-          yield* runtime.awaitState("gated", "Active");
+          yield* runtime.awaitState(Gated, LifecycleState.Active);
         }),
       ),
     );
@@ -118,10 +118,10 @@ describe("DynamicRuntime gates", () => {
           );
           yield* Deferred.await(firstStarted);
           yield* SubscriptionRef.set(gate, false);
-          yield* runtime.awaitState("gated", "Stopping");
+          yield* runtime.awaitState(Gated, LifecycleState.Stopping);
           yield* SubscriptionRef.set(gate, true);
           yield* Deferred.succeed(firstRelease, void 0);
-          yield* runtime.awaitState("gated", "Active");
+          yield* runtime.awaitState(Gated, LifecycleState.Active);
           const value = yield* runtime.use(Gated, (service) => Effect.succeed(service.generation));
           expect(value).toBe(2);
         }),
