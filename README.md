@@ -1,129 +1,181 @@
 # effect-dynamic-layer
 
-Репозиторий: [avytheone/effect-dynamic-layer](https://github.com/avytheone/effect-dynamic-layer).
+**Подключайте, отключайте и заменяйте сервисы Effect без перезапуска приложения.**
 
-Экспериментальная TypeScript-библиотека динамического управления графом Effect-сервисов. Обычные `Layer` и `Effect` остаются рецептами реализации; `DynamicRuntime` управляет их поколениями, доступностью и ресурсами.
+Библиотека следит за зависимостями между сервисами: запускает их в нужном порядке, останавливает затронутую ветку и освобождает ресурсы. Реализации остаются обычными `Effect` и `Layer`.
 
-**Цель выпуска — experimental 0.1.0, не production-ready. Пакет не публикуется.** Текущие доказательства и покрытие требований — в [docs/status.md](docs/status.md). Исходное задание — [HANDOFF-dynamic-layer.md](HANDOFF-dynamic-layer.md); явные уточнения владельца заменяют его baseline: **Effect RC и Bun**, не Effect v3/pnpm/Vitest.
+> Проект экспериментальный. Пакет пока не опубликован в npm и не заявлен готовым к промышленному использованию. Проверенная версия Effect — **4.0.0-rc.115**.
 
-## Разработка
+[Пример](#пример) · [Запуск локально](#запуск-локально) · [Документация](#документация) · [Планы](#планы)
 
-Точные версии: Bun **1.4.2**, Effect **4.0.0-rc.115**, TypeScript **7.0.2**, Biome **2.5.13**, Lefthook **2.1.12**. Bun используется для установки зависимостей, выполнения тестов и bundling. TypeScript проверяет типы и выпускает declarations. Effect — peer dependency, не встроенная копия runtime.
+## Зачем это нужно
 
-```sh
-bun install --frozen-lockfile
-bun run typecheck
-bun test
-bun run test:types
-bun run lint
-bun run build
-bun run test:package
-bun run examples
-```
+Допустим, сервис аналитики зависит от подключения к базе данных. Если подключение появится позже, аналитика должна его дождаться. Если его отключить — перестать принимать новые вызовы и завершить свою очистку **до** закрытия базы. Если заменить — запуститься с новым подключением, не перезапуская независимые части приложения.
 
-`bun run example:basic` запускает основную цепочку. Другие примеры: `example:effect-factory` и `example:failure-and-retry`.
+`DynamicRuntime` берёт эту координацию на себя. Вы описываете сервисы и их зависимости, а библиотека управляет их жизненным циклом.
 
-Lefthook проверяет staged-файлы Biome перед коммитом; перед push выполняет lint, typecheck, runtime- и type-tests. Проверки не исправляют файлы молча. Для осознанного форматирования: `bun x --no-install biome check --write .`. Коммиты делаются атомарно: инфраструктура, compatibility, модель, runtime и поставка — самостоятельные связанные изменения.
+Она пригодится там, где состав приложения меняется во время работы: подключаются инструменты агента, меняются обработчики сообщений или включаются отдельные интеграции. Это не загрузчик плагинов и не транспорт — библиотека отвечает за зависимости и владение ресурсами.
 
-## Минимальный пример
+## Пример
+
+Зарегистрируем аналитику раньше базы. Она запустится, когда база станет доступна. Затем отключим базу: библиотека сначала остановит зависимую аналитику.
 
 ```ts
 import { Context, Effect } from "effect";
-import { DynamicLayer, DynamicRuntime, LifecycleState, Requirement } from "effect-dynamic-layer";
+import {
+  DynamicLayer,
+  DynamicRuntime,
+  LifecycleState,
+  Requirement,
+} from "effect-dynamic-layer";
 
-class Database extends Context.Service<Database, { readonly label: string }>()("app/Database") {}
-class Analytics extends Context.Service<Analytics, { readonly read: Effect.Effect<string> }>()(
-  "app/Analytics",
+class Database extends Context.Service<Database, { readonly label: string }>()(
+  "app/Database",
 ) {}
 
-const program = Effect.scoped(Effect.gen(function* () {
-  const runtime = yield* DynamicRuntime.make();
-  yield* runtime.register(DynamicLayer.fromEffect(Analytics)({
-    id: "analytics",
-    requires: Requirement.service(Database),
-    acquire: Effect.gen(function* () {
-      const database = yield* Database;
-      return { read: Effect.succeed(`using ${database.label}`) };
-    }),
-  }));
-  // Отсутствующая зависимость — Pending, не ошибка регистрации.
-  yield* runtime.register(DynamicLayer.fromEffect(Database)({
-    id: "database",
-    requires: Requirement.empty,
-    acquire: Effect.succeed({ label: "database #1" }),
-  }));
-  yield* runtime.awaitState(Analytics, LifecycleState.Active);
-  yield* runtime.use(Analytics, (analytics) => analytics.read);
-  yield* runtime.disable(Database);
-  yield* runtime.awaitState(Database, LifecycleState.Disabled);
-}));
+class Analytics extends Context.Service<
+  Analytics,
+  { readonly read: Effect.Effect<string> }
+>()("app/Analytics") {}
+
+const program = Effect.scoped(
+  Effect.gen(function* () {
+    const runtime = yield* DynamicRuntime.make();
+
+    yield* runtime.register(
+      DynamicLayer.fromEffect(Analytics)({
+        id: "analytics",
+        requires: Requirement.service(Database),
+        acquire: Effect.gen(function* () {
+          const database = yield* Database;
+          return { read: Effect.succeed(`Источник: ${database.label}`) };
+        }),
+      }),
+    );
+
+    yield* runtime.register(
+      DynamicLayer.fromEffect(Database)({
+        id: "database",
+        requires: Requirement.empty,
+        acquire: Effect.succeed({ label: "основная база" }),
+      }),
+    );
+
+    yield* runtime.awaitState(Analytics, LifecycleState.Active);
+    const result = yield* runtime.use(Analytics, (analytics) => analytics.read);
+    yield* Effect.log(result);
+
+    yield* runtime.disable(Database);
+    yield* runtime.awaitState(Database, LifecycleState.Disabled);
+  }),
+);
 
 await Effect.runPromise(program);
 ```
 
-`DynamicLayer.fromLayer(Service)({ id, requires, layer, when? })` принимает обычный Layer. `fromEffect` использует тот же lifecycle через `Layer.effect`: в Effect RC он уже обеспечивает Scope для acquisition. `id` остаётся обязательным диагностическим metadata и отображается в snapshots; управляющие операции выбирают регистрацию не по нему, а по реальному `Context` service. Обычный API не требует пользовательских casts.
+В примере база — простой объект. Для настоящего подключения используйте `Effect.acquireRelease` или готовый `Layer` через `DynamicLayer.fromLayer`: освобождение ресурсов будет частью того же жизненного цикла.
 
-`Requirement.empty`, `Requirement.service(Service)` и вложенный `Requirement.all(...)` описывают обязательные зависимости. Дополнительные зависимости ради lifecycle допустимы; пропуск внешнего требования реализации — ошибка компиляции. Зависимости, обеспеченные внутренним `Layer.provide`, повторно не объявляются. Один service key может иметь только одного зарегистрированного provider, включая Pending, Disabled и завершающуюся регистрацию; используйте namespaced ключи.
+- `requires` перечисляет обязательные зависимости. Несколько зависимостей объединяются через `Requirement.all(...)`.
+- Сервис выбирается по его тегу — например, `Database`, а не по строке `"database"`. Поле `id` нужно для диагностики.
+- `runtime.use` даёт доступ к текущему работающему экземпляру на время вызова.
+- Закрытие внешнего `Effect.scoped` автоматически завершает работу `DynamicRuntime` и освобождает его ресурсы.
 
-## Основные гарантии договора
+## Что гарантирует библиотека
 
-- Controller сериализует изменения графа и публикаций, но не ждёт пользовательского I/O.
-- Публикуется только полностью построенное, ещё актуальное поколение.
-- При disable/replace/unregister или закрытии gate сначала отзывается вся затронутая ветка. Старые ссылки не допускаются в новые `use`.
-- Физическая остановка идёт от consumers к providers. Consumer finalizer может использовать старый provider до окончания своей cleanup-попытки.
-- Replacement — **stop-before-start** с промежутком недоступности; старый уже закрытый экземпляр не восстанавливается автоматически.
-- Независимые ветви не перезапускаются. Каждое поколение имеет свой Scope и свежий MemoMap; обычное sharing sublayers сохраняется внутри одного build.
-- Failed acquisition не запускает бесконечный retry. `retry(Service)` явно разрешает новую попытку; для Active/Pending/Disabled это no-op. Новое поколение нужной зависимости, новый activation cycle или replace также разрешают попытку.
-- Shutdown идемпотентен и упорядочен; closing owning Scope вызывает его автоматически.
+- **Запуск по готовности.** Сервис не запускается, пока не доступны все его обязательные зависимости. Отсутствующая зависимость — состояние ожидания, а не ошибка регистрации.
+- **Правильный порядок остановки.** Сначала завершаются зависимые сервисы и их очистка, затем освобождаются ресурсы, которыми они пользовались.
+- **Защита от устаревших экземпляров.** После подтверждённого отключения или замены новые вызовы не получают старый экземпляр. Уже выполняющиеся вызовы через `use` прерываются; освобождение ресурса ждёт их завершения и очистки.
+- **Изменения только нужной ветки.** Независимые сервисы не перезапускаются.
+- **Явное восстановление после ошибки.** Неудачный запуск не повторяется бесконечно. `retry` разрешает новую попытку; изменение нужной зависимости или замена описания также могут её разрешить.
+- **Проверка зависимостей.** Циклы и повторная регистрация одного ключа сервиса отклоняются до изменения работающего графа. Типы помогают проверить, что описание перечисляет требования реализации.
 
-Подробный договор и значения состояний — в [semantics.md](docs/semantics.md), ownership — в [architecture.md](docs/architecture.md). Уровень фактической проверки перечислен отдельно в [status.md](docs/status.md).
+При замене сначала останавливается старый экземпляр, затем запускается новый. Между ними есть период недоступности — бесшовное переключение библиотека не обещает.
 
-## Команды и ожидания
+## Управление сервисами
 
-`register`, `enable(Service)`, `disable(Service)`, `replace(Service, description)`, `unregister(Service)` и `retry(Service)` подтверждают принятие desired-state изменения. Строковый `id` не является runtime target. Controller разрешает service key по полному реестру, включая Pending, Disabled и retiring-записи; отсутствие регистрации возвращает `ServiceNotRegistered { serviceKey }`, а управление ещё очищаемой регистрацией — `NodeRetiring`. При invalidation подтверждение включает атомарное отозвание публикаций, **но не завершение acquisition/finalizers**.
+| Операция | Назначение |
+|---|---|
+| `register(description)` | Зарегистрировать описание сервиса |
+| `enable(Service)` / `disable(Service)` | Разрешить или запретить его работу |
+| `replace(Service, description)` | Заменить описание, сохранив `id` и ключ сервиса |
+| `unregister(Service)` | Отозвать сервис и удалить его регистрацию после очистки |
+| `retry(Service)` | Разрешить новую попытку после ошибки запуска |
+| `use(Service, callback)` | Выполнить операцию с работающим экземпляром |
+| `awaitState(Service, state)` | Дождаться состояния из `LifecycleState` |
+| `awaitIdle()` | Дождаться завершения текущих изменений и управляемых вызовов |
+| `shutdown` | Завершить работу всего `DynamicRuntime` |
 
-`replace(Service, description)` типобезопасно требует описание того же service и сохраняет identity цели: обязательные metadata `id` и export key replacement должны соответствовать текущей регистрации. Замена остаётся stop-before-start и не создаёт второй provider.
+**Подтверждение команды не означает, что запуск или очистка уже закончились.** Для этого используйте `awaitState` или `awaitIdle`. Эти ожидания можно отменить средствами Effect.
 
-Для завершения используйте `awaitState(Service, LifecycleState.Active)` (либо другую константу `LifecycleState`) и `awaitIdle()`. `awaitIdle()` — барьер отсутствия незавершённых lifecycle-операций, управляемых calls и уже принятых необработанных изменений. Pending/Disabled/Failed допустимы; долгоживущие scoped workers сервисов и gate watchers сами по себе не мешают idle. Это не блокировка будущих изменений.
+Состояния сервисов доступны через `snapshot` и поток `changes`: ожидание (`Pending`), запуск (`Starting`), работа (`Active`), остановка (`Stopping`), отключение (`Disabled`) и ошибка (`Failed`).
 
-`awaitState` сначала выбирает стабильную запись регистрации и затем проверяет искомое состояние. Replacement продолжает ту же запись, поэтому ожидание не теряется; unregister с последующей новой регистрацией не перенаправляет старое ожидание. Failed вместо другого ожидаемого состояния завершает ожидание ошибкой; можно ждать сам `LifecycleState.Failed`. Удалённая или retiring-запись, которую уже нельзя дождаться, возвращает `AwaitStateUnavailable` с её диагностическим `id`; отсутствие service key — `ServiceNotRegistered`. Closing/Closed также завершаются явной ошибкой. Ожидания отменяются стандартными средствами Effect; timeout ограничивает ожидание, а не освобождает чужие ресурсы принудительно.
+Для внешнего условия запуска есть поле `when: SubscriptionRef<boolean>`. Значение `false` останавливает сервис, `true` разрешает запуск при готовых зависимостях. Библиотека сама не обнаруживает сетевые отказы и не восстанавливает соединения — это задача адаптера или самого сервиса.
 
-`shutdown` намеренно выполняет непрерываемый ordered drain, как `Scope.close`: отмена caller или timeout не обрывают освобождение ресурсов посередине и не гарантируют немедленного возврата. Наблюдать удерживаемую ветку можно через snapshot, доступный и во время Closing. Это отличается от отменяемых `awaitState`/`awaitIdle`.
+## Важные ограничения
 
-## Реактивный gate
+- **Не выносите экземпляр сервиса за пределы `use`.** Не сохраняйте его для будущих вызовов и не запускайте с ним неучтённые фоновые операции. TypeScript не может запретить это автоматически.
+- **Прерывание не отменяет уже совершённое внешнее действие.** Библиотека не повторяет бизнес-операции на новом экземпляре. Таймаут запроса не доказывает, что сервер его не выполнил.
+- **Завершение ждёт освобождения ресурсов.** `shutdown` нельзя оборвать посередине очистки. Неотменяемая операция или зависший обработчик освобождения могут задержать завершение; таймаут не разрешает закрыть ресурс под работающим сервисом.
+- **Ошибка освобождения требует внимания.** Она остаётся в диагностике и запрещает автоматический перезапуск. Подробности, включая неоднозначные ошибки частичного запуска, описаны в [правилах работы](docs/semantics.md).
+- **Один ключ сервиса — одна регистрация в `DynamicRuntime`.** Несколько поставщиков одного сервиса, необязательные зависимости, автоматическое переключение на резервный сервис и загрузка кода на лету не поддерживаются.
+- **Совместимость проверена на Bun и указанной версии Effect.** Сборка ESM сама по себе не доказывает работу в браузере или других средах.
 
-Поле `when` принимает `SubscriptionRef<boolean>`. Начальное значение и изменения наблюдаются через `SubscriptionRef.changes`, без раздельных get/subscribe. False отзывает поколение; true разрешает сборку при готовых dependencies. Duplicate true не перезапускает сервис. Цикл true → false → true инвалидирует старую попытку, даже если она завершилась после последнего true.
+Снимок состояния может содержать исходную ошибку с чувствительными данными. Не отправляйте его целиком в публичные журналы; используйте подготовленное краткое описание ошибки.
 
-Подписка принадлежит регистрации: живёт после остановки поколения и disable, освобождается при replace/unregister/shutdown. После `SubscriptionRef.set` дождитесь нужного состояния runtime — изменение ref не является подтверждением controller.
+## Запуск локально
 
-Обычный `Effect<boolean>` не является реактивным условием. Потерю сетевого соединения библиотека не обнаруживает: внешний адаптер должен изменить gate/enablement либо сам сервис реализует reconnect. Polling, health supervision и transport в ядро не входят.
+Нужен **Bun 1.4.2**. Поскольку пакет ещё не опубликован, начните с примеров в репозитории:
 
-## Безопасное использование и ограничения Effect interop
+```sh
+git clone https://github.com/avytheone/effect-dynamic-layer.git
+cd effect-dynamic-layer
+bun install --frozen-lockfile
+bun run example:basic
+```
 
-Главный путь доступа — `runtime.use(Service, callback)`. Admission закрепляет одно Active-поколение; при отсутствии публикации возвращается `ServiceUnavailable`, callback не запускается. Отозвание прерывает уже допущенные calls и ждёт их cleanup до release provider. Дополнительные требования callback остаются в его типе, Context и fiber-local references наследуются от вызывающего кода. Scope вызова и scoped children завершаются вместе с call.
+Другие примеры:
 
-**Не сохраняйте и не возвращайте service object для использования вне callback.** Не запускайте неучтённые Promise/fibers с захваченным сервисом. TypeScript не имеет линейных типов и не может запретить все escape-ы. Нет публичного `get`, обещающего вечную валидность ссылки.
+```sh
+bun run example:effect-factory
+bun run example:failure-and-retry
+```
 
-Interruption не доказывает, что внешняя операция не произошла. Бизнес-команды **никогда не повторяются автоматически** на новом поколении. Некооперативные acquisition/callback/finalizer могут удерживать ветку в Stopping и задерживать shutdown; закрывать provider под продолжающим работать consumer небезопасно.
+Проверки и сборка:
 
-Поддержаны service Context dependencies, scoped ресурсы и обычная внутренняя композиция Layer. Среда построения runtime фиксируется при `make`; произвольное распространение Layer-патчей logger/tracer/config-provider/fiber-local state downstream не обещается. Метод сервиса с собственными Effect requirements сохраняет эти requirements.
+```sh
+bun test
+bun run typecheck
+bun run test:types
+bun run lint
+bun run build
+bun run test:package
+```
 
-Release failure остаётся диагностируемой, не выдаётся за успешный Closed и не приводит к автоматическому restart. Для восстановления после такой ошибки нужно исправить внешние ресурсы и создать новый runtime. Ошибка отдельной рабочей fiber сама по себе не равна health invalidation.
+Последняя команда проверяет собранный пакет в отдельном приложении: установку, публичные типы и выполнение операций с сервисами. Effect не включается в сборку библиотеки и остаётся зависимостью приложения.
 
-В Effect RC составной build Cause не размечает происхождение каждого defect. Комбинации Die с Fail/Interrupt либо нескольких Die консервативно рассматриваются как возможная ошибка rollback и тоже блокируют restart. Сохраняется исходный Cause; цена осторожности — составная acquisition-only ошибка иногда требует нового runtime вместо retry. Решение объяснено в [ADR 0002](docs/adr/0002-generations-and-stop-before-start.md).
+Bun устанавливает зависимости, выполняет тесты и собирает JavaScript. TypeScript проверяет типы и выпускает файлы объявлений. Biome проверяет стиль кода; Lefthook запускает проверки перед коммитом и отправкой изменений.
 
-Reentrant graph mutation из acquire/release и ожидание собственного Active/Idle из lifecycle callback не поддерживаются. Не используйте их для циклической синхронизации.
+## Документация
 
-## Диагностика и упаковка
+| Документ | Что внутри |
+|---|---|
+| [Правила работы](docs/semantics.md) | Состояния, команды, ожидания, отмена и освобождение ресурсов |
+| [Устройство библиотеки](docs/architecture.md) | Граф зависимостей, экземпляры сервисов и владение ресурсами |
+| [Результаты проверок](docs/status.md) | Выполненные сценарии, версии инструментов и ограничения |
+| [Совместимость с Effect](docs/compatibility.md) | Проверенные возможности используемой версии Effect |
+| [План развития](docs/roadmap.md) | Семь прикладных сценариев и критерии их готовности |
+| [История изменений](CHANGELOG.md) | Изменения библиотеки |
 
-`snapshot` и `changes` предоставляют состояния и identities поколений без service objects. `changes` — поток актуального состояния, не аудиторский журнал; версии монотонны. Raw Cause может содержать чувствительные данные: не сериализуйте snapshot целиком в публичные логи; используйте безопасное summary из модуля Snapshot.
+## Планы
 
-Bun собирает ESM bundle с `--target browser --format esm --external effect`, без обязательных platform API в core; TypeScript выпускает declarations. `test:package` упаковывает реальный tarball, устанавливает его во временный независимый TS consumer, проверяет типы и выполняет lifecycle через публичный импорт. Выбор bundle target и проверка на Bun не являются заявлением о проверенной browser-совместимости или всех поддерживаемых Node runtime.
+Следующий шаг — проверить библиотеку в реальных приложениях:
 
-Не входят: multi-provider/failover, optional/OR requirements, zero-downtime replacement, HMR/plugin loader, сеть, БД, UI, распределённые leases и sandbox недоверенного кода.
+1. Перенести интерфейс с независимо подключаемыми частями с Cordis, сохранив его поведение.
+2. Собрать среду для агента с подключаемыми инструментами и MCP-соединениями.
+3. Реализовать обработчики сообщений NATS, которые можно менять во время работы.
+4. Проверить смену конфигурации и учётных данных внешних интеграций.
+5. Проверить независимые сессии и окружения клиентов с общими ресурсами.
+6. Реализовать обратимые регистрации команд, инструментов, маршрутов и других расширений.
+7. Проверить работу с устройствами и потоками данных в локальном приложении.
 
-## План прикладных реализаций
-
-[Roadmap use cases](docs/roadmap.md) фиксирует семь направлений к реализации: composable UI без Cordis, AI-agent/MCP-tools, NATS workers, backend-интеграции, независимые sessions/tenants, реестр расширений и устройства/streams. Для каждого указаны приоритет, шаги, критерии готовности и границы ответственности.
-
-Это будущие прикладные сценарии, а не перечень уже реализованных интеграций или расширение текущих гарантий ядра. Первые три показательных приложения — UI, agent runtime и worker; остальные направления также остаются в плане.
+Это **план**, а не список готовых интеграций. Порядок реализации и условия приёмки каждого сценария сохранены в [плане развития](docs/roadmap.md).
