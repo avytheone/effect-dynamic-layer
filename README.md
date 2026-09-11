@@ -1,5 +1,7 @@
 # effect-dynamic-layer
 
+Репозиторий: [avytheone/effect-dynamic-layer](https://github.com/avytheone/effect-dynamic-layer).
+
 Экспериментальная TypeScript-библиотека динамического управления графом Effect-сервисов. Обычные `Layer` и `Effect` остаются рецептами реализации; `DynamicRuntime` управляет их поколениями, доступностью и ресурсами.
 
 **Цель выпуска — experimental 0.1.0, не production-ready. Пакет не публикуется.** Текущие доказательства и покрытие требований — в [docs/status.md](docs/status.md). Исходное задание — [HANDOFF-dynamic-layer.md](HANDOFF-dynamic-layer.md); явные уточнения владельца заменяют его baseline: **Effect RC и Bun**, не Effect v3/pnpm/Vitest.
