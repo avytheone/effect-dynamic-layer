@@ -1,96 +1,98 @@
-# Правила работы DynamicRuntime 0.1
+# DynamicRuntime 0.1 Semantics
 
-Этот документ описывает договор публичного API. Фактические результаты выполнения сценариев собраны в [status.md](status.md), а исходные критерии T01–T40 — в [исходном задании](../HANDOFF-dynamic-layer.md).
+**English** | [Русский](ru/semantics.md)
 
-## Регистрация, ключ сервиса и поколение
+This document defines the public API contract. Actual scenario execution results are collected in [status.md](status.md), while the original T01–T40 criteria are in the [original handoff](../HANDOFF-dynamic-layer.md).
 
-В механизме управления различаются три вида идентификаторов:
+## Registration, service key, and generation
 
-1. **Регистрация** задаётся обязательным диагностическим `id`, экспортируемым ключом сервиса, списком зависимостей, внешним условием запуска и версией описания.
-2. **Поколение**, то есть отдельная попытка создать экземпляр, получает уникальный возрастающий номер, собственные `Scope` и `MemoMap`, ссылки на выбранные поколения зависимостей и номера изменений разрешения на запуск и внешнего условия.
-3. **Публикация** связывает ключ сервиса с текущим полностью созданным поколением в состоянии `Active`.
+The control mechanism distinguishes three kinds of identifiers:
 
-Публичные методы `enable`, `disable`, `retry`, `unregister`, `replace` и `awaitState`, как и `use`, принимают настоящий тег сервиса из `Context`. Строковый `id` узла не служит адресом для операций `DynamicRuntime`. Контроллер ищет тег во всём реестре, а не только среди опубликованных экземпляров, поэтому регистрации в состояниях `Pending` и `Disabled`, а также регистрации, которые ещё освобождают ресурсы после удаления, не считаются отсутствующими. Одновременно зарегистрировать два описания с одним ключом сервиса нельзя.
+1. A **registration** is defined by a required diagnostic `id`, an exported service key, a dependency list, an external start condition, and a description version.
+2. A **generation**, meaning an individual attempt to create an instance, receives a unique monotonically increasing number, its own `Scope` and `MemoMap`, references to the selected dependency generations, and the revision numbers of its enablement and external condition.
+3. A **publication** associates a service key with the current fully created generation in the `Active` state.
 
-Совпадение ссылки на объект в JavaScript не означает, что два поколения тождественны. Счётчики не сбрасываются после `unregister` и новой регистрации. Запоздавший результат создания, изменения внешнего условия или остановки сверяется со стабильной записью регистрации и номером поколения, а не только со строковым `id` или изменяемой версией описания.
+The public methods `enable`, `disable`, `retry`, `unregister`, `replace`, and `awaitState`, as well as `use`, accept an actual service tag from `Context`. A node's string `id` is not an address for `DynamicRuntime` operations. The controller resolves the tag across the entire registry, not only among published instances, so registrations in `Pending` and `Disabled`, as well as registrations still releasing resources after removal, are not treated as absent. Two descriptions with the same service key cannot be registered at the same time.
 
-`replace` меняет описание внутри той же стабильной записи регистрации. `unregister` завершает существование записи; последующая регистрация того же тега создаёт уже другой компонент с новой идентичностью.
+JavaScript object reference equality does not mean that two generations are identical. Counters are not reset after `unregister` followed by a new registration. A late creation result, external-condition change, or stop completion is checked against the stable registration record and generation number, not merely against the string `id` or mutable description version.
 
-## Состояния сервиса
+`replace` changes the description within the same stable registration record. `unregister` ends that record's lifetime; a subsequent registration of the same tag creates a different component with a new identity.
 
-| Состояние | Значение |
+## Service states
+
+| State | Meaning |
 |---|---|
-| `Pending` | Работа разрешена, но запуск пока невозможен: закрыто внешнее условие или недоступна обязательная зависимость |
-| `Starting` | Выполняется принадлежащая узлу попытка создать экземпляр |
-| `Active` | Создание завершено, поколение по-прежнему актуально и опубликовано |
-| `Stopping` | Публикация отозвана, но прерывание работ, ожидание их завершения или освобождение ресурсов ещё продолжается |
-| `Disabled` | Работа запрещена и живого поколения больше нет |
-| `Failed` | При создании, наблюдении внешнего условия или освобождении ресурсов произошла диагностируемая ошибка |
+| `Pending` | Operation is enabled, but starting is not yet possible: the external condition is closed or a required dependency is unavailable |
+| `Starting` | An instance-creation attempt owned by the node is running |
+| `Active` | Creation has completed, the generation is still current, and it has been published |
+| `Stopping` | Publication has been revoked, but interrupting work, awaiting its completion, or releasing resources is still in progress |
+| `Disabled` | Operation is disabled and no live generation remains |
+| `Failed` | A diagnosable error occurred during creation, external-condition observation, or resource release |
 
-В состоянии `Pending` диагностика различает отсутствующего поставщика сервиса (`MissingService`), неработающего поставщика (`DependencyNotActive`), ещё не полученное первое значение внешнего условия (`GateInitializing`) и закрытое условие (`GateClosed`). Ошибка зависимости показывается у самого поставщика; зависимый сервис никогда не получает частично созданный экземпляр.
+In `Pending`, diagnostics distinguish an absent service provider (`MissingService`), a provider that is not operational (`DependencyNotActive`), an external condition whose first value has not yet been received (`GateInitializing`), and a closed condition (`GateClosed`). A dependency failure is reported on the provider itself; a dependent service never receives a partially created instance.
 
-Состояние `Failed` хранит `Cause`, этап и номер попытки. Типизированная ошибка, дефект и прерывание не превращаются в одну строку. Отмена создания уже устаревшего поколения считается обычной остановкой и не запускает бесконечные повторные попытки. Ошибка освобождения ресурсов запрещает автоматический перезапуск, потому что состояние внешнего ресурса после неё неизвестно.
+The `Failed` state retains the `Cause`, stage, and attempt number. A typed error, defect, and interruption are not collapsed into a single string. Cancellation of an already stale generation's creation is treated as normal stopping and does not trigger endless retries. A resource-release failure prevents automatic restart because the external resource's state is unknown afterward.
 
-## Команды и их подтверждение
+## Commands and acknowledgements
 
-| Операция | Что она делает |
+| Operation | What it does |
 |---|---|
-| `register(description)` | Проверяет будущий граф до изменения текущего состояния; новая регистрация по умолчанию включена |
-| `enable(Service)` / `disable(Service)` | Разрешает или запрещает работу; повтор уже применённой команды ничего не меняет |
-| `replace(Service, description)` | Проверяет соответствие описания тегу и будущий граф, сохраняет обязательные `id` и экспортируемый ключ цели, затем создаёт новую версию описания |
-| `unregister(Service)` | Сразу отзывает публикации и оставляет запись регистрации до полного освобождения её ресурсов |
-| `retry(Service)` | Разрешает одну новую попытку после ошибки создания; в состояниях `Active`, `Pending` и `Disabled` ничего не меняет |
+| `register(description)` | Validates the prospective graph before changing current state; a new registration is enabled by default |
+| `enable(Service)` / `disable(Service)` | Enables or disables operation; repeating an already applied command changes nothing |
+| `replace(Service, description)` | Validates that the description matches the tag and validates the prospective graph, preserves the target's required `id` and exported key, then creates a new description version |
+| `unregister(Service)` | Immediately revokes publications and retains the registration record until all of its resources have been released |
+| `retry(Service)` | Allows one new attempt after a creation failure; changes nothing in `Active`, `Pending`, and `Disabled` |
 
-Если ключ сервиса не зарегистрирован, команда возвращает `ServiceNotRegistered { serviceKey }`. Команда для регистрации, которая уже удаляется, возвращает `NodeRetiring`, а не маскирует её под отсутствующую. В списке зависимостей можно указывать ещё не зарегистрированных поставщиков. Отключённый поставщик продолжает резервировать экспортируемый ключ. Если позднее добавленный поставщик замкнул бы цикл, новая команда отклоняется без изменения работающего графа. Пока удаляемая регистрация освобождает ресурсы, повторное использование её `id` или экспортируемого ключа возвращает `NodeRetiring`; после завершения очистки и `awaitIdle()` их можно использовать снова.
+If the service key is not registered, the command returns `ServiceNotRegistered { serviceKey }`. A command targeting a registration already being removed returns `NodeRetiring` rather than disguising it as absent. The dependency list may refer to providers that have not yet been registered. A disabled provider continues to reserve its exported key. If a provider added later would close a cycle, the new command is rejected without changing the running graph. While a removed registration is releasing resources, reuse of its `id` or exported key returns `NodeRetiring`; after cleanup completes and `awaitIdle()` returns, they may be reused.
 
-Успешное подтверждение `disable`, `replace` или `unregister` означает, что контроллер уже отозвал всю затронутую ветку графа: опубликованные экземпляры удалены, создаваемые зависимые поколения помечены для остановки, а новые вызовы через `use` больше не принимаются. Поэтому после подтверждения команды новый `use` не получит старое поколение. При этом прерывание уже принятых вызовов, ожидание их завершения и освобождение ресурсов могут ещё продолжаться. Чтобы дождаться нужного состояния или полного завершения текущих работ, служат `awaitState` и `awaitIdle`.
+A successful acknowledgement of `disable`, `replace`, or `unregister` means that the controller has already revoked the entire affected graph branch: published instances have been removed, dependent generations under construction have been marked for stopping, and new calls through `use` are no longer admitted. Therefore, after the command is acknowledged, a new `use` cannot receive the old generation. Interrupting already admitted calls, awaiting their completion, and releasing resources may still be in progress. Use `awaitState` to await a required state and `awaitIdle` to await completion of current work.
 
-## Порядок перестроения графа
+## Graph rebuild order
 
 ```text
-проверить будущий граф → применить требуемое состояние → отозвать затронутые публикации
-→ остановить зависимые сервисы, создание поколений и принятые вызовы → остановить поставщика
-→ запустить готового поставщика → повторно проверить и опубликовать → запустить зависимые сервисы
+validate prospective graph → apply desired state → revoke affected publications
+→ stop dependent services, generation creation, and admitted calls → stop provider
+→ start ready provider → validate again and publish → start dependent services
 ```
 
-Незатронутые поколения продолжают работать. У каждого поколения свой новый `MemoMap`; он не разделяется всем `DynamicRuntime`. Потребитель получает уже созданные реализации выбранных поставщиков через входной `Context`, поэтому их `Layer` не создаётся повторно.
+Unaffected generations continue running. Each generation gets its own fresh `MemoMap`; it is not shared across the entire `DynamicRuntime`. A consumer receives already created implementations of the selected providers through its input `Context`, so their `Layer` is not created again.
 
-`DynamicRuntime.make()` один раз запоминает окружение `Context`, доступное в момент создания механизма управления. Это окружение служит неизменной основой для всех последующих попыток создать поколения; окружение вызывающего кода при выполнении `register`, `enable` или другой команды его не заменяет. Отдельно от этого переданная в `use` функция выполняется в окружении вызвавшего её `Effect`.
+`DynamicRuntime.make()` captures the `Context` environment available when the control mechanism is created, exactly once. This environment is the immutable foundation for every subsequent generation-creation attempt; the calling code's environment when executing `register`, `enable`, or another command does not replace it. Separately, the function passed to `use` executes in the environment of the `Effect` that invoked it.
 
-Неудачная попытка создания не повторяется для того же набора входов только из-за чтения снимка состояния, повторного события внешнего условия или изменения независимой ветки. Новую попытку разрешают явный `retry`, `replace`, новое поколение обязательного поставщика либо фактический цикл отключения и повторного разрешения запуска.
+A failed creation attempt is not retried for the same set of inputs merely because a state snapshot is read, an external-condition event is repeated, or an independent branch changes. A new attempt is allowed by an explicit `retry`, `replace`, a new generation of a required provider, or an actual disable-and-reenable cycle.
 
-## Внешнее условие запуска (`when`)
+## External start condition (`when`)
 
-Поле `when` использует `SubscriptionRef<boolean>`. Поток `SubscriptionRef.changes` выдаёт начальное значение, а затем все изменения по порядку, поэтому отдельное чтение перед подпиской не требуется. Подписка принадлежит регистрации и остаётся действующей в состояниях `Disabled` и `Pending`. Замена описания прекращает старую подписку; запоздавшее событие от неё не применяется к новому описанию.
+The `when` field uses `SubscriptionRef<boolean>`. The `SubscriptionRef.changes` stream emits the initial value followed by all changes in order, so no separate read before subscribing is required. The subscription belongs to the registration and remains active in `Disabled` and `Pending`. Replacing the description stops the old subscription; a late event from it is not applied to the new description.
 
-Доступность определяется значением, которое уже обработал контроллер. Вызов `SubscriptionRef.set` не обязан завершаться одновременно с перестроением графа внутри `DynamicRuntime`. После изменения следует ждать соответствующего состояния сервиса через `awaitState`, а не считать произвольный `awaitIdle()` подтверждением внешнего события, которое контроллер ещё не принял.
+Availability is determined by the value the controller has already processed. A call to `SubscriptionRef.set` is not required to complete simultaneously with the graph rebuild inside `DynamicRuntime`. After a change, await the corresponding service state through `awaitState` rather than treating an arbitrary `awaitIdle()` as acknowledgement of an external event that the controller has not yet accepted.
 
-`when` только разрешает или запрещает запуск. Библиотека не распознаёт сетевые отказы сама, не переподключает сервис и не повторяет незавершённые прикладные операции: это ответственность адаптера или самого сервиса.
+`when` only permits or prevents starting. The library does not detect network failures itself, reconnect a service, or retry unfinished application operations: those are responsibilities of the adapter or the service itself.
 
-## Вызовы через `use`
+## Calls through `use`
 
-Выбор опубликованного поколения и учёт нового вызова выполняются одним неделимым решением контроллера. Только после этого запускается переданная функция; она наследует окружение вызвавшего `Effect`. Отдельный `Scope` вызова ограничивает время жизни созданных ею дочерних работ. Учёт вызова снимается при успехе, ошибке, прерывании и даже при отмене до начала переданной функции.
+Selecting a published generation and accounting for a new call are performed as one indivisible controller decision. Only then is the supplied function started; it inherits the environment of the calling `Effect`. A separate call `Scope` bounds the lifetime of child work it creates. The call is removed from accounting on success, failure, interruption, and even cancellation before the supplied function starts.
 
-При отзыве поколения выполняющийся вызов прерывается и не может вернуть успешный результат. Механизм управления дожидается завершения его задачи Effect и закрытия `Scope` вызова, включая очистку дочерних работ; лишь после этого можно освобождать ресурсы поставщика. Та же переданная функция не запускается автоматически на новом поколении, поэтому библиотека не повторяет бизнес-операции.
+When a generation is revoked, a running call is interrupted and cannot return a successful result. The control mechanism waits for its Effect task to complete and for the call `Scope` to close, including cleanup of child work; only then may provider resources be released. The same supplied function is not started automatically on a new generation, so the library does not retry business operations.
 
-Экземпляр сервиса нельзя выносить за пределы `use`: это относится к возврату самого объекта, записи во внешнюю переменную, а также к неучтённым `Promise` и фоновым задачам Effect. TypeScript не обеспечивает такое ограничение линейными типами, поэтому его соблюдает вызывающий код.
+A service instance must not escape `use`: this includes returning the object itself, assigning it to an external variable, and starting untracked `Promise` or background Effect tasks. TypeScript cannot enforce this restriction with linear types, so calling code is responsible for honoring it.
 
-## Ожидания и завершение работы
+## Waiting and shutdown
 
-`awaitState(Service, state)` принимает значение из замороженного объекта `LifecycleState`; эти значения совпадают со строковыми признаками состояния в снимке. При приёме ожидание закрепляется за выбранной стабильной записью регистрации. `replace` меняет описание той же записи и не отменяет ожидание. Напротив, `unregister` с последующей регистрацией того же тега не может незаметно перенаправить старое ожидание на новый компонент.
+`awaitState(Service, state)` accepts a value from the frozen `LifecycleState` object; these values match the string state discriminants in snapshots. On admission, the wait is attached to the selected stable registration record. `replace` changes that record's description and does not cancel the wait. Conversely, `unregister` followed by registration of the same tag cannot silently redirect an old wait to the new component.
 
-`awaitState` сначала проверяет, не достигнуто ли нужное состояние; ждать самого `LifecycleState.Failed` разрешено. Если вместо другого ожидаемого состояния сервис перешёл в `Failed`, метод возвращает диагностируемую ошибку. Никогда не зарегистрированный тег приводит к `ServiceNotRegistered`. Для удалённой или уже удаляющейся записи, у которой нужное состояние недостижимо, возвращается `AwaitStateUnavailable { id, expected }`. Если сам механизм управления уже закрывается или закрыт, ожидание завершается ошибкой `RuntimeClosing` или `RuntimeClosed`, а не остаётся навсегда. `awaitIdle` не требует, чтобы все сервисы стали `Active`, и не ждёт обычные долгоживущие задачи самих реализаций.
+`awaitState` first checks whether the desired state has already been reached; waiting for `LifecycleState.Failed` itself is allowed. If the service enters `Failed` instead of another expected state, the method returns a diagnosable error. A tag that has never been registered results in `ServiceNotRegistered`. For a removed or already retiring record whose desired state is unreachable, it returns `AwaitStateUnavailable { id, expected }`. If the control mechanism itself is already closing or closed, the wait fails with `RuntimeClosing` or `RuntimeClosed` rather than remaining pending forever. `awaitIdle` does not require every service to become `Active`, and it does not wait for ordinary long-lived tasks owned by service implementations.
 
-Жизненный цикл всего механизма управления имеет состояния `Running` → `Closing` → `Closed` либо `CloseFailed`. В `Closing` новые команды изменения графа и новые вызовы `use` запрещены, все публикации отзываются, но контроллер продолжает принимать сообщения о завершении создания, остановки, вызовов и освобождения ресурсов. Даже если замены изменили хронологический порядок создания `Scope`, зависимые сервисы освобождаются раньше их поставщиков.
+The lifecycle of the control mechanism itself is `Running` → `Closing` → `Closed` or `CloseFailed`. In `Closing`, new graph mutation commands and new `use` calls are rejected, all publications are revoked, but the controller continues to accept completion messages for creation, stopping, calls, and resource release. Even if replacements changed the chronological order in which `Scope` objects were created, dependent services are released before their providers.
 
-Повторный вызов `shutdown` безопасен. Он дожидается упорядоченного освобождения ресурсов, завершает наблюдателей внешних условий и служебных исполнителей и сохраняет ошибки освобождения. Закрытие внешнего владеющего `Scope` запускает тот же путь. Ошибка одного завершающего обработчика не отменяет попытки освободить независимые узлы, а `CloseFailed` не выдаётся за `Closed`.
+Repeated `shutdown` calls are safe. Shutdown awaits ordered resource release, terminates external-condition observers and internal workers, and preserves release failures. Closing the external owning `Scope` starts the same path. Failure of one finalizer does not cancel attempts to release independent nodes, and `CloseFailed` is not reported as `Closed`.
 
-Сам `shutdown` непрерываем: отмена ожидающей его задачи Effect не может уничтожить контроллер посреди освобождения ресурсов и будет замечена только после завершения всей процедуры. Поэтому таймаут вокруг `shutdown` не гарантирует немедленный возврат управления. В отличие от него, `awaitState` и `awaitIdle` остаются отменяемыми. Все уже принятые конкурентные запросы `shutdown` получают подтверждение; внутренний `Scope`, в котором выполняются работы `DynamicRuntime`, закрывается только после выхода контроллера. Снимок состояния доступен и во время `Closing`, чтобы можно было увидеть ещё удерживаемые ресурсы.
+`shutdown` itself is uninterruptible: cancelling the Effect task waiting for it cannot destroy the controller halfway through resource release and is observed only after the entire procedure finishes. Consequently, a timeout around `shutdown` does not guarantee an immediate return of control. In contrast, `awaitState` and `awaitIdle` remain interruptible. Every already admitted concurrent `shutdown` request receives an acknowledgement; the internal `Scope` in which `DynamicRuntime` work runs is closed only after the controller exits. A state snapshot remains available during `Closing`, making it possible to see resources that are still retained.
 
-## Неоднозначные ошибки при создании и откате
+## Ambiguous creation and rollback failures
 
-Публичный `Cause` не указывает, откуда именно внутри `Layer` пришёл каждый дефект. Если при создании сочетаются ошибка или прерывание с дефектом либо присутствует несколько дефектов, нельзя надёжно определить, произошёл ли дефект при создании ресурса или при откате уже созданной части. Поэтому такой результат безопасно считается возможной ошибкой освобождения: узел помещается в карантин и не перезапускается автоматически.
+The public `Cause` does not identify exactly where inside a `Layer` each defect originated. If creation combines failure or interruption with a defect, or contains multiple defects, it is impossible to determine reliably whether a defect occurred while acquiring a resource or while rolling back an already acquired part. Such a result is therefore safely treated as a possible release failure: the node is quarantined and is not restarted automatically.
 
-Карантин не снимают команды `enable`, `retry` или `replace`; для продолжения работы может потребоваться новый `DynamicRuntime`. Такое консервативное правило иногда запрещает повторную попытку даже для составной ошибки, которая на самом деле возникла только при создании. Зато оно не позволяет запустить новое поколение после потенциально неудачного освобождения старых ресурсов. Исходный `Cause` сохраняется; подробное обоснование приведено в [ADR 0002](adr/0002-generations-and-stop-before-start.md).
+The quarantine is not cleared by `enable`, `retry`, or `replace`; continuing operation may require a new `DynamicRuntime`. This conservative rule can sometimes prohibit a retry even when a composite failure actually occurred only during creation. In return, it prevents starting a new generation after a potentially failed release of old resources. The original `Cause` is retained; the detailed rationale is in [ADR 0002](adr/0002-generations-and-stop-before-start.md).
 
-Некооперативный код JavaScript или непрерываемый `Effect` может надолго оставить сервис в `Stopping`. Таймаут не даёт права освободить поставщика, пока зависимый сервис ещё работает. Из обработчиков создания или освобождения ресурсов нельзя повторно изменять граф жизненного цикла; также эти обработчики не должны ждать собственного состояния `Active` или общего `awaitIdle()`.
+Non-cooperative JavaScript code or an uninterruptible `Effect` can leave a service in `Stopping` for a long time. A timeout does not permit releasing a provider while a dependent service is still running. Creation and resource-release handlers must not recursively mutate the lifecycle graph; nor should those handlers await their own `Active` state or the global `awaitIdle()`.

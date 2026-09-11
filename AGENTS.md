@@ -1,64 +1,68 @@
-# Работа над effect-dynamic-layer
+# Working on effect-dynamic-layer
 
-## Что это за проект
+**English** | [Русский](docs/ru/agent-guide.md)
 
-Экспериментальная TypeScript-библиотека для изменения графа Effect-сервисов во время работы приложения. Реализации описываются обычными `Effect` и `Layer`; `DynamicRuntime` управляет их доступностью, поколениями и ресурсами.
+## About the project
 
-Приоритеты: корректность владения ресурсами, отсутствие гонок, понятные типы и небольшой интерфейс. Удобство и оптимизация не должны ослаблять эти гарантии.
+An experimental TypeScript library for changing a graph of Effect services while an application is running. Implementations are ordinary `Effect` and `Layer` values; `DynamicRuntime` manages their availability, generations, and resources.
 
-Пакет пока не опубликован в npm и не заявлен готовым к промышленному использованию. Не публикуй пакет, не открывай доступ к приватному репозиторию и не выполняй развёртывание без отдельного поручения.
+Priorities: correct resource ownership, freedom from races, clear types, and a small API. Convenience and optimization must not weaken these guarantees.
 
-## Где искать договорённости
+The package has not been published to npm and is not claimed to be production-ready. Do not publish the package, make the private repository public, or deploy anything without a separate instruction.
 
-- [README.md](README.md) — назначение библиотеки, пример и быстрый запуск.
-- [docs/semantics.md](docs/semantics.md) — действующие правила работы. Читай перед изменением жизненного цикла или публичного API.
-- [docs/architecture.md](docs/architecture.md) — устройство и владение ресурсами.
-- [docs/compatibility.md](docs/compatibility.md) — проверенные возможности выбранной версии Effect.
-- [docs/status.md](docs/status.md) — фактические результаты проверок и ограничения.
-- [docs/adr/](docs/adr/) — принятые архитектурные решения и причины отказа от альтернатив.
-- [docs/roadmap.md](docs/roadmap.md) — семь будущих прикладных сценариев, их порядок и критерии готовности.
-- [HANDOFF-dynamic-layer.md](HANDOFF-dynamic-layer.md) — исходное задание, инварианты I1–I12 и сценарии T01–T40.
+## Where to find the contract
 
-Читай относящиеся к задаче разделы, а не всю документацию при каждой правке. В исходном задании сохранены исторические указания на Effect 3, pnpm и Vitest. Они не отменяют позднее одобренный выбор Effect 4 RC и Bun. Точные зависимости и команды определяются `package.json` и `bun.lock`; действующее поведение описано в правилах работы и архитектурных решениях.
+- [README.md](README.md) — purpose, example, and quick start.
+- [docs/semantics.md](docs/semantics.md) — current lifecycle contract. Read it before changing lifecycle behavior or the public API.
+- [docs/architecture.md](docs/architecture.md) — implementation structure and resource ownership.
+- [docs/compatibility.md](docs/compatibility.md) — verified capabilities of the selected Effect version.
+- [docs/status.md](docs/status.md) — actual verification results and limitations.
+- [docs/adr/](docs/adr/) — architectural decisions and reasons for rejecting alternatives.
+- [docs/roadmap.md](docs/roadmap.md) — seven future application scenarios, their order, and acceptance criteria.
+- [HANDOFF-dynamic-layer.md](HANDOFF-dynamic-layer.md) — original specification, invariants I1–I12, and scenarios T01–T40.
 
-Наличие сценария в плане не означает, что он реализован или что нужно начинать его без поручения. Завершённую приёмку версии 0.1.0 не открывай заново только из-за старых формулировок исходного задания.
+Read the sections relevant to the task, not every document for every edit. The original specification retains historical references to Effect 3, pnpm, and Vitest. These do not override the later approved choice of Effect 4 RC and Bun. `package.json` and `bun.lock` define exact dependencies and commands; lifecycle semantics and architectural decisions describe the current behavior.
 
-## Как выполнять изменения
+A scenario appearing in the roadmap does not mean it is implemented or should be started without a request. Do not reopen the completed 0.1.0 acceptance work solely because of historical wording in the original specification.
 
-1. Различай обсуждение, исследование и поручение реализовать. Из запроса выдели результат, границы и способ проверки; для существенной работы кратко обозначь их перед началом.
-2. Сначала изучи текущую реализацию и существующие подходы. Доступные факты выясняй самостоятельно; спрашивай о существенном выборе результата или риска.
-3. Сохраняй один ответственный центр для связанного изменения. Независимые участки можно делать параллельно, но общие файлы и итоговую проверку должен координировать один исполнитель.
-4. Не добавляй соседние улучшения, новые подсистемы и универсальные обёртки без необходимости. Не меняй гарантии библиотеки под удобство одного примера.
-5. Не перезаписывай чужие незавершённые изменения, не переписывай историю Git и не обходи проверки ради успешной команды.
-6. Доводи изменение до работающего результата. В конце сообщи, что сделано, как проверено и что осталось непроверенным; не выдавай заготовку за готовую возможность.
+## How to make changes
 
-## Техническая основа и стиль
+1. Distinguish discussion, research, and a request to implement. Identify the result, boundaries, and verification method; briefly state them before substantial work.
+2. Study the current implementation and existing patterns first. Find accessible facts yourself; ask about significant choices of outcome or risk.
+3. Keep one owner for a connected change. Independent work can run in parallel, but one person or agent must coordinate shared files and integrated verification.
+4. Do not add adjacent improvements, new subsystems, or general-purpose wrappers without a concrete need. Do not change library guarantees to make a single example convenient.
+5. Do not overwrite someone else's unfinished work, rewrite Git history, or bypass checks just to make a command succeed.
+6. Deliver a working result. State what changed, how it was verified, and what remains unverified; do not present a scaffold as a completed feature.
 
-- Используй Bun для зависимостей, тестов и сборки. Сейчас закреплены Bun `1.4.2` и Effect `4.0.0-rc.115`; остальные точные версии смотри в `package.json`.
-- Не смешивай API Effect 3 и Effect 4. Перед использованием незнакомого API проверь публичные типы установленной версии; важное поведение подтверди небольшим реальным запуском.
-- Не импортируй `effect/internal/*`, не разбирай закрытое внутреннее представление `Layer` и не включай копию Effect в сборку библиотеки. Обновление версии требует отдельной проверки совместимости.
-- Сохраняй строгие типы и существующие соглашения. Не маскируй ошибку приведением типов или подавлением диагностики. Общее представление разнородных описаний уже сосредоточено в `src/internal/erased.ts`; не размножай обходы системы типов по проекту.
-- При изменении интерфейса обновляй всех вызывающих его пользователей, примеры и проверки типов. Не оставляй старые перегрузки и псевдонимы без явно согласованной причины.
-- Пиши простую реализацию с понятными именами. Комментарии должны объяснять владение ресурсом, порядок действий или причину решения, а не пересказывать строку кода.
-- Общение и документация — на понятном русском. Не смешивай русскую грамматику с английскими словами: «условие запуска», «зависимый сервис», «освобождение ресурсов». Названия API и кода не переводи. `Scope` — область жизни ресурсов, а не область видимости или защитная изоляция.
+## Technical foundation and style
 
-## Гарантии, которые нельзя случайно ослабить
+- Use Bun for dependencies, tests, and builds. Bun `1.4.2` and Effect `4.0.0-rc.115` are currently pinned; see `package.json` for the other exact versions.
+- Do not mix Effect 3 and Effect 4 APIs. Before using an unfamiliar API, check the installed version's public types; verify important behavior with a small real execution.
+- Do not import `effect/internal/*`, inspect private `Layer` internals, or bundle a copy of Effect with the library. A version upgrade requires a separate compatibility check.
+- Preserve strict types and existing conventions. Do not hide errors with type assertions or diagnostic suppression. The shared representation of heterogeneous descriptors is already centralized in `src/internal/erased.ts`; do not spread type-system workarounds across the project.
+- When changing an interface, update every caller, example, and type check. Do not retain obsolete overloads or aliases without an explicitly agreed reason.
+- Prefer straightforward implementations and clear names. Comments should explain resource ownership, ordering, or the reason for a decision rather than narrating a line of code.
+- **English is the official project language.** Write canonical documentation, code comments, test descriptions, and commit messages in clear English. Keep exact API identifiers unchanged. Reply to the user in their preferred language; this does not change the language of project artifacts.
+- Maintain Russian translations in `docs/ru/`, including `agent-guide.md` as the translation of this file. Do not create a second `AGENTS.md` there: it would introduce nested agent instructions rather than ordinary translated documentation. When changing documented behavior or policy, update the affected Russian translations in the same change. English is authoritative if versions disagree; reconcile the translation rather than silently keeping conflicting contracts.
+- Prefer precise, plain language in both versions. In Russian, `Scope` means a resource lifetime scope, not lexical scope or security isolation. Do not translate API identifiers or alter historical evidence merely to modernize its wording.
 
-Подробный договор находится в [правилах работы](docs/semantics.md). При изменении ядра особенно проверь следующее:
+## Guarantees that must not be weakened accidentally
 
-- **Выбор сервиса.** Управляющие операции и `use` принимают тег сервиса. `id` остаётся диагностическим именем. Поиск для команд идёт по полному реестру, включая ожидающие, отключённые и удаляемые регистрации; одному ключу соответствует одна регистрация в `DynamicRuntime`.
-- **Проверка перед изменением.** Будущий граф проверяется до изменения работающего состояния. При отключении, замене или удалении вся затронутая ветка перестаёт принимать новые вызовы до подтверждения команды. Подтверждение не означает, что очистка уже закончилась.
-- **Порядок освобождения.** Зависимый сервис и управляемые вызовы завершают очистку раньше поставщика ресурса. Независимые ветки не перезапускаются. При замене сначала останавливается старое поколение, затем создаётся новое.
-- **Поколения и владение.** Каждая попытка получает собственные `Scope` и новый `MemoMap`. Уже созданные зависимости заимствуются без повторного создания или передачи права освободить их. Устаревший результат никогда не публикуется.
-- **Ожидания и условия запуска.** `awaitState` связан с конкретной записью регистрации: переживает `replace`, но не переключается на новую запись после `unregister`. Подписка на `when` принадлежит регистрации, а не одному работающему поколению.
-- **Управляемые вызовы.** `use` сохраняет окружение вызывающего Effect. После отзыва ресурса учитываются прерывание и очистка вызова, включая дочерние задачи. Объект сервиса нельзя выносить за пределы вызова; TypeScript не обеспечивает этот запрет автоматически. Бизнес-операции не повторяются на новом поколении.
-- **Завершение и ошибки.** `shutdown` дожидается упорядоченной очистки и не прерывается посередине. Контроллер живёт до получения нужных сообщений о завершении; получение результата исполнителя и отправка такого сообщения защищены от прерывания. Ошибка освобождения и неоднозначная ошибка отката не снимаются командами `enable`, `retry` или `replace`.
+The full contract is in the [lifecycle semantics](docs/semantics.md). When changing the core, pay particular attention to these points:
 
-Для прикладных сценариев не смешивай срок жизни интерфейса, зависимости сервисов и доступность сети. Закрытое условие `when` останавливает поколение; оно не обещает сохранить DOM или несохранённый ввод.
+- **Service addressing.** Control operations and `use` accept a service tag. `id` remains a diagnostic name. Control lookup uses the full registry, including pending, disabled, and retiring registrations; each key has one registration within a `DynamicRuntime`.
+- **Validation before mutation.** Validate the proposed graph before changing the running state. Disabling, replacing, or unregistering revokes new calls across the affected branch before acknowledging the command. Acknowledgement does not mean cleanup has finished.
+- **Release order.** Dependent services and managed calls finish cleanup before the resource provider does. Independent branches do not restart. Replacement stops the old generation before creating the new one.
+- **Generations and ownership.** Each attempt gets its own `Scope` and a fresh `MemoMap`. Existing dependencies are borrowed without rebuilding them or transferring the right to release them. A stale result is never published.
+- **Waits and startup conditions.** `awaitState` binds to a specific registration: it survives `replace` but does not switch to a new registration after `unregister`. The subscription to `when` belongs to the registration, not a single active generation.
+- **Managed calls.** `use` preserves the calling Effect's environment. Revocation accounts for interruption and cleanup of the call, including child fibers. A service object must not escape the call; TypeScript does not enforce this automatically. Business operations are not replayed on a new generation.
+- **Shutdown and failures.** `shutdown` waits for ordered cleanup and cannot be interrupted halfway through it. The controller stays alive until required completion messages arrive; capturing a worker's result and sending its completion message are protected from interruption. Release failures and ambiguous rollback failures cannot be cleared by `enable`, `retry`, or `replace`.
 
-## Как проверять
+In application scenarios, do not conflate UI lifetime, service dependencies, and network availability. A closed `when` condition stops a generation; it does not promise to preserve DOM or unsaved input.
 
-Проверяй изменённое поведение, а не только компиляцию. Для ошибки подготовь воспроизведение и убедись, что исправление его устраняет. Если меняется публичный интерфейс, проверь не только исходники, но и собранный пакет.
+## Verification
+
+Verify the changed behavior, not just compilation. For a bug, prepare a reproduction and confirm that the fix removes it. If the public interface changes, check the built package as well as the source.
 
 ```sh
 bun install --frozen-lockfile
@@ -71,20 +75,20 @@ bun run test:package
 bun run examples
 ```
 
-Не запускай весь набор после каждой строки: во время работы используй относящийся к изменению сценарий, а общие проверки выполняй после завершения связанных правок. При параллельной работе общий набор запускается после того, как исполнители закончили менять файлы.
+Do not run the full suite after every line: exercise the relevant scenario while working, then run shared checks after the connected edits are complete. During parallel work, run shared checks after writers have finished changing files.
 
-- Тесты поведения находятся в `test/`, проверки типов — в `test-d/`, примеры — в `examples/`, проверка внешнего приложения — в `scripts/test-package.ts`.
-- В тестах гонок используй управляемые барьеры, например `Deferred`, а не случайные задержки и надежду на порядок планирования.
-- Постоянный тест должен защищать наблюдаемое поведение, границу или реальную гонку. Не закрепляй им внутреннюю организацию кода, формулировку текста или факт передачи аргумента. Для разовой проверки используй временный сценарий и затем убери его.
-- В выбранной версии Effect квант `References.MaxOpsBeforeYield = 1` не продвигает даже простой Effect. Существующие проверки неблагоприятного планирования используют квант `16`; не принимай зависание на `1` за ошибку этой библиотеки.
-- Для интерфейса нужна проверка в настоящем браузере, для внешней интеграции — работающий протокол или устройство. Сборка ESM не доказывает совместимость с браузером, а имитация успешного ответа не доказывает работу интеграции.
-- Если изменена только документация, проверь смысл, ссылки и разметку; новый или изменённый исполняемый пример запусти. Не добавляй тесты лишь ради редакторской правки.
+- Behavioral tests live in `test/`, type checks in `test-d/`, examples in `examples/`, and the external consumer check in `scripts/test-package.ts`.
+- For race tests, use controlled barriers such as `Deferred`, not arbitrary delays and assumptions about scheduling order.
+- A permanent test should protect observable behavior, a boundary, or a real race. Do not pin internal code organization, text wording, or the mere forwarding of an argument. Use a temporary scenario for one-off verification, then remove it.
+- In the selected Effect version, `References.MaxOpsBeforeYield = 1` does not make progress even for a simple Effect. Existing adversarial scheduling checks use `16`; do not mistake a hang at `1` for a bug in this library.
+- UI changes need verification in a real browser; external integrations need a working protocol or device. An ESM build does not prove browser compatibility, and an imitation of a successful response does not prove that an integration works.
+- For documentation-only changes, check meaning, links, and rendering; run any new or changed executable example. Do not add tests just for an editorial change.
 
-## Документация и Git
+## Documentation and Git
 
-- Изменил поведение — обнови соответствующий документ, примеры и историю изменений. Смысловое архитектурное решение зафиксируй в ADR; не создавай отдельный отчёт для каждой небольшой правки.
-- В `docs/status.md` записывай только действительно выполненные проверки. В `docs/roadmap.md` отмечай критерии по факту проверки; не теряй ни одно из семи согласованных направлений и не выдавай план за реализацию.
-- Не добавляй в репозиторий учётные данные, персональные данные, содержимое локальных журналов или личные настройки среды. Исходный `Cause` тоже может содержать чувствительные данные.
-- Делай небольшие атомарные коммиты: один связанный результат вместе с нужными проверками и документацией. Перед отправкой убедись, что в коммит не попали посторонние изменения.
-- Lefthook проверяет подготовленные файлы перед коммитом, а перед отправкой запускает стиль кода, типы и тесты. Не отключай эти проверки и не исправляй их результат подавлением ошибок.
-- Завершай рабочий список задач после выполнения поручения. Будущие сценарии остаются в плане развития, а не в незавершённом списке текущей работы.
+- When behavior changes, update the relevant document, examples, and changelog. Record a substantive architectural decision in an ADR; do not create a separate report for every small edit.
+- Record only checks that were actually run in `docs/status.md`. Mark roadmap criteria only after verification; retain all seven agreed directions and do not present plans as implementation.
+- Do not commit credentials, personal data, local log contents, or personal environment settings. An original `Cause` can also contain sensitive data.
+- Make small, atomic commits: one connected result together with its necessary checks and documentation. Before pushing, ensure that the commit contains no unrelated changes.
+- Lefthook checks staged files before commits and runs code style checks, type checks, and tests before pushes. Do not disable these checks or address their findings by suppressing errors.
+- Complete the working task list when the request is fulfilled. Future scenarios belong in the roadmap, not in the unfinished list for the current task.

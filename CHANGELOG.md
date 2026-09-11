@@ -1,15 +1,17 @@
-# История изменений
+# Changelog
 
-## 0.1.0 — экспериментальная версия, не опубликована
+**English** | [Русский](docs/ru/CHANGELOG.md)
 
-- Добавлены неизменяемые описания зависимостей `Requirement` и конструкторы `DynamicLayer.fromLayer` и `DynamicLayer.fromEffect`. Входные зависимости и предоставляемый сервис проверяются типами.
-- Добавлен работающий внутри `Scope` механизм `DynamicRuntime`. Он поддерживает регистрацию сервисов, команды `enable`, `disable`, `replace`, `unregister` и `retry`, атомарно проверяет направленный ациклический граф зависимостей и перестраивает только затронутую ветвь.
-- Управляющие команды полностью переведены со строковых идентификаторов узлов на теги сервисов `Context`. Добавлен экспорт констант `LifecycleState`. Целевой сервис ищется во всём реестре, в том числе среди ожидающих, отключённых и проходящих очистку узлов, а `awaitState` остаётся связан с записью выбранного узла.
-- Для каждой попытки запуска создаётся собственный набор: поколение, `Scope` и `MemoMap`. Ресурсы освобождаются в порядке от зависимых сервисов к поставщикам. При замене старое поколение полностью останавливается до запуска нового, а независимые ветви не перезапускаются.
-- Добавлены изменяемые условия запуска `when: SubscriptionRef<boolean>` и управляемый вызов `use`. Он сохраняет `Context` вызывающего кода, поддерживает отмену и учитывает завершение вызова при освобождении ресурсов.
-- Добавлены диагностические снимки состояния, безопасные краткие описания `Cause`, отменяемые ожидания состояния и простоя, а также идемпотентный `shutdown`.
-- `shutdown` непрерываемо дожидается упорядоченного освобождения графа. Ошибки освобождения сохраняются в диагностике, а неоднозначные составные дефекты при сборке консервативно изолируют узел из-за возможной ошибки отката. Ограничения такого поведения описаны в README и ADR.
-- Точная версия `effect@4.0.0-rc.115` указана и в `peerDependencies`, и в `devDependencies`. Первая запись требует, чтобы использующее библиотеку приложение предоставляло Effect; вторая устанавливает его для разработки и проверок самой библиотеки. Для установки, тестов и сборки используется Bun `1.4.2`; также настроены строгая проверка TypeScript, выпуск файлов объявлений, Biome и Lefthook.
-- Добавлены исполняемые примеры, проверки ошибок типов и проверка собранного архива пакета во внешнем проекте.
+## 0.1.0 — experimental release, unpublished
 
-Фактические результаты и матрица T01–T40: [docs/status.md](docs/status.md). Готовность к промышленному использованию, совместимость с браузерами и поддержка других выпусков-кандидатов Effect не заявляются.
+- Added immutable `Requirement` dependency descriptors and the `DynamicLayer.fromLayer` and `DynamicLayer.fromEffect` constructors. Input dependencies and the provided service are type-checked.
+- Added the `DynamicRuntime` mechanism, which runs within a `Scope`. It supports service registration; the `enable`, `disable`, `replace`, `unregister`, and `retry` commands; atomic validation of the directed acyclic dependency graph; and rebuilding only the affected branch.
+- Management commands have been migrated completely from string node identifiers to `Context` service tags. The `LifecycleState` constants are now exported. The target service is resolved across the entire registry, including pending, disabled, and retiring nodes, while `awaitState` remains bound to the selected node record.
+- Each startup attempt receives its own generation, `Scope`, and `MemoMap`. Resources are released from dependent services to providers. On replacement, the old generation stops completely before the new one starts, while unaffected branches are not restarted.
+- Added mutable startup conditions through `when: SubscriptionRef<boolean>` and the managed `use` call. It preserves the calling code's `Context`, supports interruption, and accounts for call completion during resource release.
+- Added diagnostic state snapshots, safe concise `Cause` summaries, interruptible waits for state and idleness, and idempotent `shutdown`.
+- `shutdown` waits uninterruptibly for orderly graph release. Release failures remain in diagnostics, while ambiguous composite defects during construction conservatively isolate a node because a rollback failure may have occurred. The limitations of this behavior are documented in the README and ADRs.
+- The exact version `effect@4.0.0-rc.115` is specified in both `peerDependencies` and `devDependencies`. The former requires the application using the library to provide Effect; the latter installs it for developing and verifying the library itself. Bun `1.4.2` is used for installation, testing, and builds; strict TypeScript checking, declaration-file generation, Biome, and Lefthook are also configured.
+- Added executable examples, type-error checks, and verification of the built package archive in an external project.
+
+Actual results and the T01–T40 matrix: [docs/status.md](docs/status.md). Production readiness, browser compatibility, and support for other Effect release candidates are not claimed.

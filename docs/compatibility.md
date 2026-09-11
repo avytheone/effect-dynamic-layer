@@ -1,43 +1,45 @@
-# Совместимость с Effect
+# Effect compatibility
 
-## Проверенная основа
+**English** | [Русский](ru/compatibility.md)
 
-| Компонент | Точная версия | Что подтверждено |
+## Verified foundation
+
+| Component | Exact version | What was confirmed |
 | --- | --- | --- |
-| Effect | `4.0.0-rc.115` | Установлен через Bun; публичные исходники TypeScript и `package.json` прочитаны из `node_modules/effect` |
-| Bun | `1.4.2` | Проект использует эту версию как диспетчер пакетов, среду выполнения и средство запуска тестов |
-| Отдельная проверка совместимости | `test/compatibility.test.ts` | Проверено запуском: 10 из 10 тестов, 17 проверок утверждений, 79 мс |
+| Effect | `4.0.0-rc.115` | Installed through Bun; public TypeScript sources and `package.json` inspected in `node_modules/effect` |
+| Bun | `1.4.2` | The project uses this version as package manager, runtime, and test runner |
+| Dedicated compatibility probe | `test/compatibility.test.ts` | Executed successfully: 10 of 10 tests, 17 assertion checks, 79 ms |
 
-Проект осознанно выбрал предварительную версию `4.0.0-rc.115` вместо первоначальной рекомендации из документа передачи работ использовать Effect 3.x. Исследование Effect 3 остаётся историческим исходным материалом, но пакет не обещает совместимость с Effect 3 и не импортирует `effect/internal/*`.
+The project deliberately selected the `4.0.0-rc.115` prerelease instead of the original handoff's recommendation to use Effect 3.x. The Effect 3 research remains historical source material, but the package does not promise Effect 3 compatibility and does not import `effect/internal/*`.
 
-## Что означают статусы
+## What the statuses mean
 
-- **Подтверждено исходниками** — сигнатура или реализация найдена в публичном файле установленного пакета.
-- **Подтверждено тестом** — указанный исполняемый проверочный сценарий успешно запущен.
-- **Ожидает исполняемой проверки** — тест наблюдаемого поведения написан или исправлен, но его текущая редакция ещё не запускалась.
-- Итоговый запуск `bun test test/compatibility.test.ts` на Bun `1.4.2`: **10 тестов прошли, 0 ошибок, 17 проверок утверждений, 79 мс**.
-- Первый запуск дал 9 успешно пройденных тестов и 1 ошибку и выявил важную особенность поведения. Три последовательных отдельных `Effect.scoped` закрывали владение после каждого чтения, а значение `idleTimeToLive` по умолчанию у `RcMap` равно нулю, поэтому `LayerMap` вернул `[1, 2, 3]`. В исправленном тесте одновременно удерживаются два перекрывающихся владения: он подтвердил `[1, 1, 2]`. После `invalidate` следующее владение получает новое поколение.
+- **Confirmed from source** — the signature or implementation was found in a public file of the installed package.
+- **Confirmed by test** — the specified executable probe ran successfully.
+- **Awaiting executable verification** — an observable-behavior test has been written or corrected, but its current revision has not yet been run.
+- Final `bun test test/compatibility.test.ts` run on Bun `1.4.2`: **10 tests passed, 0 failures, 17 assertion checks, 79 ms**.
+- The first run produced 9 passing tests and 1 failure, revealing an important behavioral detail. Three sequential, separate `Effect.scoped` calls released ownership after each read, and `RcMap` has a default `idleTimeToLive` of zero, so `LayerMap` returned `[1, 2, 3]`. The corrected test holds two overlapping leases concurrently and confirmed `[1, 1, 2]`. After `invalidate`, the next lease receives a new generation.
 
-## Матрица отдельной проверки
+## Dedicated probe matrix
 
-| Контракт | Исполняемый сценарий | Текущий статус |
+| Contract | Executable scenario | Current status |
 | --- | --- | --- |
-| Отдельные Scope и MemoMap для каждого поколения | Один объект `Layer` собирается дважды с разными входными `Context`, свежими `Layer.makeMemoMap` и `Scope.make`; получаются разные поколения, и оба Scope освобождаются независимо | Подтверждено тестом |
-| Успешное создание | Ресурс остаётся жив после `Layer.buildWithMemoMap` и освобождается при `Scope.close` | Подтверждено тестом |
-| Ошибка при создании | Ресурс, полученный до типизированной ошибки, освобождается | Подтверждено тестом |
-| Прерывание создания | Зависшая сборка прерывается через `Fiber.interrupt`; ранее полученный ресурс освобождается, а `Exit.hasInterrupts` возвращает истину | Подтверждено тестом |
-| Срок жизни `forkScoped` | Дочерняя задача продолжает работать после завершения создания и прерывается при закрытии Scope поколения | Подтверждено тестом |
-| `SubscriptionRef.changes` | Поток сначала выдаёт начальное значение, затем два обновления; подписчик сообщает о готовности до записей | Подтверждено тестом |
-| Context/Reference вызывающей стороны | `Effect.forkIn`, запущенный из дочерней задачи вызывающей стороны, наследует предоставленные `Context.Service` и переопределение `Context.Reference` | Подтверждено тестом |
-| `ScopedRef` | Замена освобождает старый ресурс, но ранее полученный объект по-прежнему указывает на старое значение | Подтверждено тестом |
-| `LayerMap` | Два перекрывающихся владения используют одно значение ключа; `invalidate` удаляет его из карты, и последующее владение создаёт новое значение | Подтверждено тестом |
-| Наличие модулей | Корневой экспорт содержит `ScopedRef` и `LayerMap`, но не содержит `Reloadable` | Подтверждено исходниками и тестом |
+| Separate Scope and MemoMap for every generation | One `Layer` object is built twice with different input `Context` values, fresh `Layer.makeMemoMap` values, and `Scope.make`; distinct generations result, and both Scope instances are released independently | Confirmed by test |
+| Successful creation | The resource remains live after `Layer.buildWithMemoMap` and is released by `Scope.close` | Confirmed by test |
+| Creation failure | A resource acquired before a typed failure is released | Confirmed by test |
+| Creation interruption | A suspended build is interrupted through `Fiber.interrupt`; a previously acquired resource is released, and `Exit.hasInterrupts` returns true | Confirmed by test |
+| `forkScoped` lifetime | A child task continues running after creation finishes and is interrupted when the generation Scope closes | Confirmed by test |
+| `SubscriptionRef.changes` | The stream emits the initial value first, then two updates; the subscriber reports readiness before the writes | Confirmed by test |
+| Caller Context/Reference | `Effect.forkIn`, started from the caller's child task, inherits the provided `Context.Service` and `Context.Reference` override | Confirmed by test |
+| `ScopedRef` | Replacement releases the old resource, but a previously obtained object still refers to the old value | Confirmed by test |
+| `LayerMap` | Two overlapping leases use one value for a key; `invalidate` removes it from the map, and a later lease creates a new value | Confirmed by test |
+| Module availability | The root export contains `ScopedRef` and `LayerMap`, but does not contain `Reloadable` | Confirmed from source and by test |
 
-## Публичные API версии rc.115
+## Public APIs in rc.115
 
-Ниже перечислены только сигнатуры, найденные в публичных исходниках установленного пакета.
+Only signatures found in the installed package's public sources are listed below.
 
-### Context и Reference
+### Context and Reference
 
 ```ts
 const Database = Context.Service<DatabaseShape>("app/Database")
@@ -56,9 +58,9 @@ const databaseFromContext = Context.get(context, Database)
 const databaseFromFiber = yield* Database
 ```
 
-Строковый `key` задаёт идентичность во время выполнения. `Context.Reference` получает значение по умолчанию лениво и кеширует его; значение можно переопределить через `Effect.provideService`. Текущий контекст наследуется при создании дочерней задачи. Отдельный проверочный сценарий подтверждает это для `forkIn`.
+The string `key` defines runtime identity. `Context.Reference` obtains its default value lazily and caches it; the value can be overridden through `Effect.provideService`. The current context is inherited when a child task is created. A dedicated executable probe confirms this for `forkIn`.
 
-### Явная сборка Layer
+### Explicit Layer construction
 
 ```ts
 const memoMap = yield* Layer.makeMemoMap
@@ -67,7 +69,7 @@ const context = yield* Layer.buildWithMemoMap(layer, memoMap, scope)
 yield* Scope.close(scope, Exit.void)
 ```
 
-Точная сигнатура без каррирования:
+The exact uncurried signature is:
 
 ```ts
 Layer.buildWithMemoMap<ROut, E, RIn>(
@@ -77,9 +79,9 @@ Layer.buildWithMemoMap<ROut, E, RIn>(
 ): Effect.Effect<Context.Context<ROut>, E, RIn>
 ```
 
-Есть и перегрузка с данными в последнем аргументе: `Layer.buildWithMemoMap(memoMap, scope)(layer)`. `Layer.makeMemoMap` — значение `Effect<MemoMap>`, а не функция. Для каждого нового поколения библиотека должна создавать отдельные корневые MemoMap и закрываемый Scope. `Layer.forkMemoMap(parent)` наследует уже кешированные слои, поэтому не заменяет свежую карту поколения.
+There is also a data-last overload: `Layer.buildWithMemoMap(memoMap, scope)(layer)`. `Layer.makeMemoMap` is an `Effect<MemoMap>` value, not a function. The library must create a separate root MemoMap and a closeable Scope for each new generation. `Layer.forkMemoMap(parent)` inherits already cached layers, so it does not substitute for a fresh generation map.
 
-Входной контекст можно передать через публичный API, например:
+An input context can be provided through the public API, for example:
 
 ```ts
 const built = Layer.buildWithMemoMap(layer, memoMap, scope).pipe(
@@ -87,34 +89,34 @@ const built = Layer.buildWithMemoMap(layer, memoMap, scope).pipe(
 )
 ```
 
-### Scope и финализаторы
+### Scope and finalizers
 
 ```ts
-const scope = yield* Scope.make() // либо "sequential" / "parallel"
+const scope = yield* Scope.make() // or "sequential" / "parallel"
 yield* Scope.addFinalizer(scope, cleanup)
 yield* Scope.close(scope, exit)
 ```
 
-`Effect.acquireRelease(acquire, release, { interruptible?: boolean })` регистрирует освобождение ресурса в текущем Scope. Функция `release` имеет тип `(resource, exit) => Effect<unknown, never, R>`: типизированная ошибка освобождения невозможна, но дефект остаётся наблюдаемым как Cause.
+`Effect.acquireRelease(acquire, release, { interruptible?: boolean })` registers resource release in the current Scope. The `release` function has type `(resource, exit) => Effect<unknown, never, R>`: a typed release failure is impossible, but a defect remains observable as a Cause.
 
-### Дочерние задачи Fiber
+### Fiber child tasks
 
 ```ts
 const child = yield* Effect.forkChild(work)
 const owned = yield* Effect.forkIn(work, ownerScope)
 const currentScopeChild = yield* Effect.forkScoped(work)
 
-const exit = yield* Fiber.await(owned) // Exit<A, E>, failure не распространяется
-const value = yield* Fiber.join(owned) // A, failure распространяется
+const exit = yield* Fiber.await(owned) // Exit<A, E>; failure is not propagated
+const value = yield* Fiber.join(owned) // A; failure is propagated
 
-yield* Fiber.interrupt(owned)          // прервать и дождаться завершения
+yield* Fiber.interrupt(owned)          // interrupt and wait for completion
 ```
 
-У `forkChild`, `forkIn` и `forkScoped` есть параметры `{ startImmediately?: boolean; uninterruptible?: boolean | "inherit" }`. В публичных экспортируемых значениях rc.115 функции `interruptFork` нет. Для прерывания без ожидания нельзя придумывать её сигнатуру: владелец должен либо выполнить `Fiber.interrupt`, либо явно запустить сам эффект прерывания как дочернюю задачу с подходящим сроком жизни.
+`forkChild`, `forkIn`, and `forkScoped` have options `{ startImmediately?: boolean; uninterruptible?: boolean | "inherit" }`. The public exported values in rc.115 do not include an `interruptFork` function. Its signature must not be invented to obtain interruption without waiting: the owner must either execute `Fiber.interrupt` or explicitly start that interruption effect itself as a child task with an appropriate lifetime.
 
-`forkChild` автоматически находится под надзором родителя. `forkIn` привязывает остановку к переданному Scope и подходит для рабочей задачи, которая должна жить дольше короткой задачи создания. `forkScoped` использует текущий Scope, поэтому внутри создания Layer задача привязана к Scope, который Layer предоставляет этому созданию.
+`forkChild` is automatically supervised by its parent. `forkIn` binds stopping to the supplied Scope and is suitable for a worker task that must outlive a short creation task. `forkScoped` uses the current Scope, so inside Layer creation the task is bound to the Scope that the Layer provides to that creation.
 
-### Queue и Deferred
+### Queue and Deferred
 
 ```ts
 const queue = yield* Queue.unbounded<Message>()
@@ -129,7 +131,7 @@ const won = yield* Deferred.succeed(deferred, value) // boolean
 const failed = yield* Deferred.fail(deferred, error) // boolean
 ```
 
-У `Queue` в этой предварительной версии два параметра: `Queue<A, E>`. Очередь умеет завершаться и падать; для обычной очереди управляющего цикла достаточно `E = never`. Логический результат `offer`, `shutdown` или завершения `Deferred` нельзя считать подтверждением обработки сообщения: он описывает только состояние самой операции или гонки завершения.
+In this prerelease, `Queue` has two type parameters: `Queue<A, E>`. A queue can shut down and fail; for a normal control-loop queue, `E = never` is sufficient. The boolean result of `offer`, `shutdown`, or completing a `Deferred` must not be treated as acknowledgement that a message has been processed: it describes only the operation's own state or the completion race.
 
 ### SubscriptionRef
 
@@ -140,9 +142,9 @@ yield* SubscriptionRef.set(ref, next)
 const stream = SubscriptionRef.changes(ref)
 ```
 
-Публичная реализация создаёт `PubSub.unbounded({ replay: 1 })`, публикует начальное значение во время `make` и сериализует изменения семафором. Поэтому `changes` обеспечивает атомарный переход от текущего значения к будущим изменениям без отдельного `get`, который создал бы окно между чтением и подпиской. Наблюдаемое поведение дополнительно закреплено исполняемым проверочным сценарием.
+The public implementation creates `PubSub.unbounded({ replay: 1 })`, publishes the initial value during `make`, and serializes changes with a semaphore. Therefore, `changes` provides an atomic transition from the current value to future changes without a separate `get` that would create a gap between reading and subscribing. The observed behavior is additionally locked down by an executable probe.
 
-### Exit, Cause и ошибки
+### Exit, Cause, and errors
 
 ```ts
 const exit = yield* Effect.exit(effect)
@@ -156,17 +158,17 @@ if (Exit.isFailure(exit)) {
 }
 ```
 
-`Fiber.await` возвращает `Exit`, а `Fiber.join` распространяет Cause. В rc.115 функции классификации называются `hasFails`, `hasDies` и `hasInterrupts`. Нельзя по памяти переносить сюда старые названия в единственном числе.
+`Fiber.await` returns an `Exit`, while `Fiber.join` propagates the Cause. In rc.115, the classification functions are named `hasFails`, `hasDies`, and `hasInterrupts`. Older singular names must not be carried over from memory.
 
-## Reloadable, ScopedRef и LayerMap
+## Reloadable, ScopedRef, and LayerMap
 
 ### Reloadable
 
-Файла `src/Reloadable.ts` нет, а корневой `src/index.ts` не экспортирует `Reloadable`. В rc.115 импорт `effect/Reloadable` недоступен как публичный API. Нельзя перенести старое решение простой заменой сигнатуры Reloadable: модуль удалён из выбранной версии.
+There is no `src/Reloadable.ts` file, and the root `src/index.ts` does not export `Reloadable`. In rc.115, `effect/Reloadable` is unavailable as a public API. The old solution cannot be ported merely by changing a Reloadable signature: the module was removed from the selected version.
 
 ### ScopedRef
 
-Доступны следующие операции:
+The following operations are available:
 
 ```ts
 ScopedRef.fromAcquire(acquire)
@@ -175,11 +177,11 @@ ScopedRef.get(ref)
 ScopedRef.set(ref, acquireReplacement)
 ```
 
-`set` получает заменяющее значение в новом Scope, затем под защитой семафора закрывает Scope старого значения и меняет ссылку. Этот примитив полезен для атомарной замены одного значения, которое владеет ресурсом. Для DynamicLayer его недостаточно: уже работающий зависимый сервис, сохранивший старый объект, не пересобирается. Здесь нет ориентированного ациклического графа зависимостей, вычисления затронутой части графа, поколений с остановкой перед запуском, допуска и отзыва управляемых вызовов или общего состояния графа.
+`set` acquires the replacement value in a new Scope, then closes the old value's Scope and changes the reference under semaphore protection. This primitive is useful for atomically replacing one resource-owning value. It is not sufficient for DynamicLayer: an already running dependent service that retained the old object is not rebuilt. There is no directed acyclic dependency graph, calculation of the affected graph portion, stop-before-start generations, admission and revocation of managed calls, or global graph state.
 
 ### LayerMap
 
-`LayerMap.make(lookup, options?)` создаёт кеш по ключу, ресурсы которого живут в Scope. Публичный объект предоставляет:
+`LayerMap.make(lookup, options?)` creates a keyed cache whose resources live in a Scope. The public object provides:
 
 ```ts
 layerMap.get(key): Layer.Layer<I, E>
@@ -188,24 +190,24 @@ layerMap.contextEffectOption(key)
 layerMap.invalidate(key): Effect.Effect<void>
 ```
 
-Этот API можно использовать как ориентир для создания ресурсов по ключу, владений со счётчиком ссылок и сброса значения. Но ключ LayerMap выбирает один способ создания; API не описывает отдельный изменяемый граф зависимостей, каскадную пересборку зависимых сервисов, идентичность поколения, топологический порядок остановки перед запуском, условия запуска или управляемое использование с временем жизни, ограниченным вызывающей стороной. Один вызов `invalidate(key)` не выражает контракты библиотеки на публикацию и отзыв доступа.
+This API can serve as a reference for keyed resource creation, reference-counted leases, and value invalidation. But a LayerMap key selects one creation method; the API does not describe a separate mutable dependency graph, cascading reconstruction of dependent services, generation identity, topological stop-before-start order, start conditions, or managed use with a caller-bounded lifetime. One `invalidate(key)` call does not express the library's access-publication and revocation contracts.
 
-## Как прежние названия соотносятся с rc.115
+## Mapping earlier names to rc.115
 
-| Прежнее предположение или название | Effect `4.0.0-rc.115` |
+| Earlier assumption or name | Effect `4.0.0-rc.115` |
 | --- | --- |
-| `Context.Tag` / `GenericTag` для нового ключа сервиса | `Context.Service<Shape>(key)` либо форма класса `Context.Service<Self, Shape>()(key)` |
-| Ключ контекста со значением по умолчанию, похожий на FiberRef | `Context.Reference(key, { defaultValue })` |
-| `Layer.buildWithMemoMap(layer, memo, scope)` | Сохранён; публичная перегрузка подтверждена |
-| `Effect.forkScoped` | Сохранён; возвращает `Fiber` и требует текущий `Scope` |
-| Явно принадлежащая владельцу дочерняя задача | `Effect.forkIn(effect, scope)` |
-| Обычная дочерняя задача под надзором | `Effect.forkChild(effect)` |
-| `Fiber.interruptFork` | Отсутствует в публичном API |
-| `Reloadable` | Отсутствует в пакете и корневых экспортируемых значениях |
-| `ScopedRef` | Доступен как отдельный публичный модуль |
-| `LayerMap` | Доступен как публичный модуль; в rc он не находится в `unstable/*` |
-| `SubscriptionRef.changes` | Функция `SubscriptionRef.changes(ref)`, поток с повтором начального значения |
+| `Context.Tag` / `GenericTag` for a new service key | `Context.Service<Shape>(key)` or the class form `Context.Service<Self, Shape>()(key)` |
+| Context key with a default value, similar to FiberRef | `Context.Reference(key, { defaultValue })` |
+| `Layer.buildWithMemoMap(layer, memo, scope)` | Retained; public overload confirmed |
+| `Effect.forkScoped` | Retained; returns a `Fiber` and requires the current `Scope` |
+| Child task explicitly bound to an owner | `Effect.forkIn(effect, scope)` |
+| Ordinary supervised child task | `Effect.forkChild(effect)` |
+| `Fiber.interruptFork` | Absent from the public API |
+| `Reloadable` | Absent from the package and root exported values |
+| `ScopedRef` | Available as a separate public module |
+| `LayerMap` | Available as a public module; in the RC it is not under `unstable/*` |
+| `SubscriptionRef.changes` | Function `SubscriptionRef.changes(ref)`, a stream that replays the initial value |
 
-## Границы сделанных выводов
+## Limits of these conclusions
 
-Отдельная проверка совместимости подтверждает поведение примитивов, но не доказывает корректность всего DynamicRuntime. В частности, наследование контекста вызывающей стороны в одном `forkIn` ещё не доказывает, что допуск через управляющий цикл сохранит этот контекст. Переданная функция должна запускаться в рабочей задаче, созданной из контекста вызывающей стороны, а управляющий цикл должен только последовательно принимать решение о допуске. Полная гонка между допуском и отзывом проверяется тестами DynamicRuntime после реализации.
+The dedicated compatibility probe confirms primitive behavior but does not prove that the whole `DynamicRuntime` is correct. In particular, caller-context inheritance in one `forkIn` does not by itself prove that admission through the control loop preserves that context. The supplied function must start in a worker task created from the caller's context, while the control loop must only make the admission decision sequentially. DynamicRuntime tests verify the complete race between admission and revocation after implementation.

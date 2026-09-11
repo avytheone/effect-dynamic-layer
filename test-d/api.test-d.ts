@@ -148,21 +148,21 @@ runtime.unregister(Database);
 runtime.replace(Database, databaseDescription);
 runtime.awaitState(Database, LifecycleState.Active);
 
-// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+// @ts-expect-error Control operations no longer accept a string node id.
 runtime.enable("database");
-// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+// @ts-expect-error Control operations no longer accept a string node id.
 runtime.disable("database");
-// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+// @ts-expect-error Control operations no longer accept a string node id.
 runtime.retry("database");
-// @ts-expect-error Управляющие операции больше не принимают строковый node id.
+// @ts-expect-error Control operations no longer accept a string node id.
 runtime.unregister("database");
-// @ts-expect-error replace выбирает регистрацию по Context service, а не по строковому node id.
+// @ts-expect-error replace addresses a registration by Context service, not a string node id.
 runtime.replace("database", databaseDescription);
-// @ts-expect-error awaitState выбирает регистрацию по Context service, а не по строковому node id.
+// @ts-expect-error awaitState addresses a registration by Context service, not a string node id.
 runtime.awaitState("database", LifecycleState.Active);
-// @ts-expect-error awaitState принимает только экспортированные состояния lifecycle.
+// @ts-expect-error awaitState only accepts exported lifecycle states.
 runtime.awaitState(Database, "Unknown");
-// @ts-expect-error NoInfer не позволяет описанию другого service изменить тип целевого service.
+// @ts-expect-error NoInfer prevents a descriptor for another service from changing the target service type.
 runtime.replace(Database, fromEffectDescription);
 
 const useEffect = runtime.use(Analytics, (analytics) =>

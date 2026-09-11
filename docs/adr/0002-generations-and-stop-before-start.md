@@ -1,42 +1,44 @@
-# ADR 0002: поколения и остановка перед новым запуском
+# ADR 0002: Generations and Stop Before Start
 
-Статус: принято как правило реализации; подтверждение его выполнения находится в тестах и в `../status.md`.
+**English** | [Русский](../ru/adr/0002-generations-and-stop-before-start.md)
 
-## Решение
+Status: accepted as an implementation rule; evidence that it is followed is available in the tests and in `../status.md`.
 
-Ресурсами владеет конкретное поколение компонента, а не строковый `id` и не ссылка на объект сервиса. Каждая регистрация и каждая попытка запуска получают свой монотонно возрастающий идентификатор. Для поколения сохраняются версия описания, номера изменений разрешения на запуск и внешнего условия `when`, а также поколения зависимостей, с которыми оно было создано.
+## Decision
 
-Управляющие команды принимают теги сервисов `Context`; строковый `id` остаётся диагностическим именем. Это отделяет выбор узла через публичный API от идентификатора конкретной регистрации или попытки запуска.
+Resources are owned by a specific component generation, not by a string `id` or a reference to a service object. Every registration and every startup attempt receives its own monotonically increasing identifier. A generation records the descriptor version, the revision numbers of its permission to start and its external `when` condition, and the generations of the dependencies with which it was created.
 
-Один последовательно обрабатывающий команды контроллер владеет целевым графом, поколениями и опубликованными экземплярами сервисов. Его очередь не должна терять ни команды, ни сообщения о завершении операций жизненного цикла. Создание и освобождение пользовательских ресурсов, а также переданные в `use` функции не выполняются внутри шага контроллера: отдельные исполнители выполняют эту работу и возвращают результат событием.
+Management commands accept `Context` service tags; the string `id` remains a diagnostic name. This separates node selection through the public API from the identifier of a specific registration or startup attempt.
 
-Когда изменение делает ветвь графа недействительной, контроллер сначала отзывает опубликованные экземпляры всей затронутой транзитивной ветви. Это относится и к зависимым сервисам в состоянии `Starting`, и к уже допущенным управляемым вызовам. Подтверждение команды означает, что желаемое изменение применено и старые экземпляры больше не выдаются новым вызовам. Оно не означает, что все операции ввода-вывода и очистка уже завершились.
+A single controller that processes commands sequentially owns the target graph, generations, and published service instances. Its queue must not lose either commands or lifecycle-operation completion messages. User resource acquisition and release, as well as functions passed to `use`, do not run within a controller step: separate workers perform this work and return the result as an event.
 
-После отзыва экземпляров очистка идёт от зависимых сервисов к поставщикам. Завершающая функция зависимого сервиса может обращаться к прежнему поставщику: его ресурс физически остаётся открыт, пока попытка очистки зависимого сервиса не завершится.
+When a change invalidates a branch of the graph, the controller first revokes the published instances of the entire affected transitive branch. This also applies to dependent services in the `Starting` state and to managed calls that have already been admitted. Command acknowledgment means that the desired change has been applied and old instances are no longer provided to new calls. It does not mean that all I/O operations and cleanup have already completed.
 
-При замене действует строгий порядок **сначала остановить старое поколение, затем запустить новое**. Два живых поколения одного узла одновременно не допускаются. Пока прежняя регистрация освобождает ресурсы, её `id` и экспортируемый ключ остаются заняты. Запоздавшее сообщение о завершении сопоставляется с идентификатором конкретной операции, а не только со строковым `id`.
+After instances are revoked, cleanup proceeds from dependent services to providers. A dependent service's finalizer may access the previous provider: that provider's resource remains physically open until the dependent service's cleanup attempt has completed.
 
-## Владение `Scope` и повторное использование внутри сборки
+Replacement follows a strict **stop the old generation first, then start the new one** order. Two live generations of the same node are not allowed at the same time. While the previous registration releases resources, its `id` and exported key remain occupied. A late completion message is matched to the identifier of the specific operation, not merely to the string `id`.
 
-Каждая попытка запуска получает отдельный `Scope` и новый `MemoMap`. Одинаковые вложенные слои в пределах одной сборки разделяются обычным механизмом Effect, но между поколениями результат запоминания не переносится. Поставщики передаются зависимым сервисам как уже созданный `Context` с заимствованными сервисами; их `Layer` повторно не собирается.
+## `Scope` Ownership and Reuse Within a Build
 
-Контроллер должен работать, пока не получит все необходимые сообщения о завершении очистки. Владеющий `Scope` запускает упорядоченное завершение `DynamicRuntime`; порядок освобождения графа не должен зависеть от случайного порядка закрытия дочерних `Scope`.
+Each startup attempt receives a separate `Scope` and a new `MemoMap`. Identical nested layers within one build are shared through Effect's ordinary mechanism, but memoized results are not carried between generations. Providers are passed to dependent services as an already built `Context` containing borrowed services; their `Layer` is not built again.
 
-## Последствия
+The controller must continue running until it has received all required cleanup-completion messages. The owning `Scope` initiates orderly `DynamicRuntime` shutdown; graph release order must not depend on the incidental order in which child `Scope` instances close.
 
-- При замене возможен период недоступности. Бесшовное переключение без простоя не обещается.
-- После закрытия старого экземпляра библиотека не возвращается к нему автоматически.
-- Незатронутые ветви сохраняют свои поколения и ресурсы.
-- Ошибка освобождения ресурса остаётся видимой и запрещает автоматический повторный запуск: внешний ресурс мог остаться занятым.
-- Операция создания ресурса, вызов через `use` или завершающая функция, которые не реагируют на прерывание, могут надолго удержать состояние `Stopping` и не дать завершить `shutdown`. Тайм-аут ожидания не разрешает закрыть поставщика, пока зависимый сервис ещё работает.
-- `use` работает с одним закреплённым поколением, не повторяет бизнес-операцию на новом экземпляре и сохраняет окружение вызвавшего `Effect`. Запрет выносить сервис за пределы `use` остаётся договорённостью с пользователем: TypeScript не имеет линейных типов и не может обеспечить этот запрет автоматически.
+## Consequences
 
-## Уточнения после исполняемой проверки выпуска-кандидата Effect
+- Replacement may involve a period of unavailability. Seamless switching without downtime is not promised.
+- After an old instance has been closed, the library does not automatically fall back to it.
+- Unaffected branches retain their generations and resources.
+- A resource-release failure remains visible and prevents an automatic restart: the external resource may still be occupied.
+- A resource acquisition operation, a call through `use`, or a finalizer that does not respond to interruption may hold the `Stopping` state for a long time and prevent `shutdown` from completing. A wait timeout does not permit the provider to close while a dependent service is still running.
+- `use` operates on one pinned generation, does not retry a business operation on a new instance, and preserves the environment of the calling `Effect`. The prohibition against retaining a service beyond `use` remains a contract with the user: TypeScript has no linear types and cannot enforce this restriction automatically.
 
-`shutdown` непрерываемо и в заданном порядке завершает работу всего графа. Отмена одного ожидающего вызова не должна закрывать исполнительный `Scope` посреди освобождения ресурсов. Контроллер подтверждает все уже принятые запросы `shutdown` и только после этого завершает работу; затем закрывается исполнительный `Scope`. Поэтому тайм-аут вокруг `shutdown` не гарантирует немедленного возврата управления. Для отменяемого наблюдения предназначены `awaitState` и `awaitIdle`, а `snapshot` можно читать и в состоянии `Closing`.
+## Clarifications After Executable Verification of the Effect Release Candidate
 
-Сообщение исполнителя о результате — часть управления ресурсами, а не отменяемая пользовательская работа. В исполнителе сборки или условия запуска прерываемой остаётся только сама операция ввода-вывода. Получение `Exit` и отправка сообщения о завершении защищены маской от прерывания. Без неё прерывание между окончанием операции и отправкой результата оставило бы исполнителя навсегда учтённым как незавершённый.
+`shutdown` terminates the entire graph uninterruptibly and in the specified order. Interrupting one waiting caller must not close the worker `Scope` in the middle of resource release. The controller acknowledges every already accepted `shutdown` request before it stops; only then is the worker `Scope` closed. Therefore, a timeout around `shutdown` does not guarantee an immediate return of control. `awaitState` and `awaitIdle` provide interruptible observation, while `snapshot` can also be read in the `Closing` state.
 
-`Cause` в используемом выпуске-кандидате Effect не указывает происхождение каждого дефекта внутри `Layer`. Поэтому сочетание `Die` с `Fail` или `Interrupt`, а также несколько `Die` во время сборки консервативно считаются возможной ошибкой отката после частично созданного ресурса. Узел сохраняет исходный `Cause` и остаётся изолированным из-за возможной ошибки освобождения; команды `enable`, `replace` и `retry` эту изоляцию не снимают.
+A worker's result message is part of resource management, not interruptible user work. In a build or startup-condition worker, only the I/O operation itself remains interruptible. Obtaining the `Exit` and sending the completion message are protected by an interruption mask. Without it, interruption between operation completion and result delivery would leave the worker permanently tracked as unfinished.
 
-Такой безопасный выбор имеет цену: составная ошибка, возникшая только при создании ресурса, тоже может потребовать нового `DynamicRuntime` вместо `retry`. Библиотека намеренно не пытается угадывать происхождение ошибки по тексту исключения или по закрытому внутреннему представлению `Layer`.
+In the Effect release candidate being used, `Cause` does not identify the origin of each defect within a `Layer`. Therefore, a combination of `Die` with `Fail` or `Interrupt`, as well as multiple `Die` values during construction, is conservatively treated as a possible rollback failure after a resource was partially acquired. The node retains the original `Cause` and remains isolated because release may have failed; the `enable`, `replace`, and `retry` commands do not remove this isolation.
+
+This safe choice has a cost: a composite error that occurred only while acquiring a resource may also require a new `DynamicRuntime` rather than `retry`. The library deliberately does not try to infer the source of an error from exception text or from the private internal representation of `Layer`.

@@ -1,166 +1,168 @@
-# Передача проекта: DynamicLayer — динамический граф сервисов поверх Effect
+# Project Handoff: DynamicLayer — a Dynamic Service Graph on Top of Effect
 
-**Для:** Codex / агента разработки  
-**Дата:** 11 сентября 2026 года  
-**Результат работы:** небольшая самостоятельная TypeScript-библиотека, тесты, примеры и документация.  
-**Рабочее имя:** `dynamic-layer`. Доступность имени в npm не проверена; ничего не публиковать.  
-**Целевой выпуск:** `0.1.0`, экспериментальный.  
-**Статус этого файла:** проектная спецификация, а не описание уже существующего API. Примеры ниже показывают, насколько удобным должен быть API; их нужно превратить в компилируемые и проверяемые примеры.
+**English** | [Русский](docs/ru/HANDOFF-dynamic-layer.md)
 
-**Одобренное уточнение публичного API:** выполнен полный переход со строковых обозначений целевых сервисов на реальные сервисы `Context`, без сохранения прежнего интерфейса. У `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` нет строковых перегрузок, псевдонимов или отдельных дескрипторов. `LifecycleState` экспортируется как замороженный набор констант и одноимённый тип-объединение. Это уточнение имеет приоритет над старыми сигнатурами с `id`, приведёнными ниже; примеры и таблица в разделах 6–7 уже приведены к одобренной форме.
+**For:** Codex / development agent  
+**Date:** September 11, 2026  
+**Deliverable:** a small, standalone TypeScript library, tests, examples, and documentation.  
+**Working name:** `dynamic-layer`. npm name availability has not been checked; do not publish anything.  
+**Target release:** `0.1.0`, experimental.  
+**Status of this file:** a design specification, not a description of an existing API. The examples below illustrate the intended API ergonomics; they must be turned into compilable, testable examples.
+
+**Approved public API clarification:** the full transition from string-based target service designations to actual `Context` services has been completed, without retaining the previous interface. `enable`/`disable`/`retry`/`unregister`/`replace`/`awaitState` have no string overloads, aliases, or separate descriptors. `LifecycleState` is exported as a frozen set of constants and a union type of the same name. This clarification takes precedence over the older signatures using `id` shown below; the examples and table in sections 6–7 have already been updated to the approved form.
 
 ---
 
-## 0. Задание агенту
+## 0. Assignment for the Agent
 
-Создай библиотеку **динамического управления жизненным циклом Effect-сервисов**. Обычные `Layer` и `Effect` должны оставаться единицами реализации. Библиотека должна добавлять регистрацию компонентов во время работы, отслеживание доступности их зависимостей, остановку и повторную сборку затронутой части графа.
+Create a library for **dynamic lifecycle management of Effect services**. Ordinary `Layer` and `Effect` must remain the implementation units. The library must add runtime component registration, dependency availability tracking, and shutdown and rebuilding of the affected portion of the graph.
 
-Не ограничивайся проектированием: сначала проверь возможности установленной версии Effect, затем последовательно реализуй этапы из раздела 19, запусти проверки и представь проверяемый результат. Не заменяй работающие тесты рассуждениями о том, что код «должен работать».
+Do not stop at design: first verify the capabilities of the installed Effect version, then implement the stages in section 19 in order, run the checks, and present a verifiable result. Do not replace working tests with reasoning about why the code “should work.”
 
-Приоритеты, по убыванию:
+Priorities, in descending order:
 
-1. Корректное владение ресурсами и порядок остановки.
-2. Отсутствие гонок при публикации и использования устаревших экземпляров.
-3. Типобезопасное описание зависимостей.
-4. Небольшой понятный API и совместимость с обычными `Layer` из Effect.
-5. Возможность диагностировать работу библиотеки.
-6. Оптимизация производительности.
+1. Correct resource ownership and shutdown order.
+2. No publication races or use of stale instances.
+3. Type-safe dependency declarations.
+4. A small, understandable API and compatibility with ordinary Effect `Layer` values.
+5. The ability to diagnose the library’s behavior.
+6. Performance optimization.
 
-Это **не** задание на создание распределённой платформы, инфраструктурного фреймворка или полноценного клона Cordis. Не добавляй транспорт, загрузчик npm-плагинов, UI, БД и интеграции для промышленной эксплуатации.
+This is **not** an assignment to build a distributed platform, an infrastructure framework, or a full Cordis clone. Do not add transport, an npm plugin loader, a UI, a database, or production integrations.
 
-Если работа ведётся в существующем репозитории, сначала прочитай его инструкции и изучи текущее состояние. Не удаляй чужие файлы, не переписывай историю Git, не выполняй развёртывание или публикацию пакета. Небольшие изменения формы API допустимы после пробной проверки типов; смысловые гарантии этой спецификации нельзя менять без явного описания в ADR.
+If working in an existing repository, first read its instructions and examine its current state. Do not delete other people’s files, rewrite Git history, deploy, or publish the package. Small API shape changes are acceptable after a trial type check; the semantic guarantees of this specification must not be changed without an explicit description in an ADR.
 
-## 1. Контекст и поправки к исходной идее
+## 1. Context and Corrections to the Original Idea
 
-Исходная мотивация — получить поведение наподобие Cordis, но с ресурсами и вычислениями на Effect: зависимость появилась — зависимый сервис запустился; зависимость исчезла — зависимый сервис остановился; зависимость вернулась — зависимый сервис построился заново.
+The original motivation is to achieve Cordis-like behavior, but with resources and computations built on Effect: when a dependency appears, the dependent service starts; when the dependency disappears, the dependent service stops; when the dependency returns, the dependent service is rebuilt.
 
-Нельзя исходить из следующих неверных упрощений:
+Do not base the implementation on the following incorrect simplifications:
 
-**«Layer в Effect бывает только статическим».** В Effect v3 уже есть `Layer.suspend`, `Layer.flatMap`, `Layer.unwrapEffect` и `Layer.unwrapScoped`. Вычисление рецепта слоя с помощью функции или Effect — существующая возможность, а не новшество этой библиотеки. [S1]
+**“Effect Layer values can only be static.”** Effect v3 already has `Layer.suspend`, `Layer.flatMap`, `Layer.unwrapEffect`, and `Layer.unwrapScoped`. Computing a layer recipe using a function or an Effect is an existing capability, not an innovation introduced by this library. [S1]
 
-**«В Effect нет перезагрузки сервисов».** Есть `Reloadable` и `ScopedRef`; отдельно есть экспериментальный `LayerMap` с доступом по ключу и инвалидацией. Их необходимо изучить, но они не являются готовой реализацией всех контрактов этой спецификации. В частности, смена значения в ссылке сама по себе не пересобирает зависимые сервисы, которые уже захватили старый объект. [S2–S4]
+**“Effect has no service reloading.”** It has `Reloadable` and `ScopedRef`; separately, there is an experimental `LayerMap` with keyed access and invalidation. These must be investigated, but they are not ready-made implementations of all the contracts in this specification. In particular, changing the value in a reference does not, by itself, rebuild dependent services that have already captured the old object. [S2–S4]
 
-**«Произвольный Effect является реактивным условием».** Effect описывает вычисление. После выполнения он сам не сообщает, когда изменились прочитанные им внешние данные. Источник изменений должен быть явным: например, `SubscriptionRef`, поток событий или контролируемая алгебра требований, добавленная позднее. У `SubscriptionRef.changes` есть и начальное значение, и дальнейшие изменения. [S5]
+**“An arbitrary Effect is a reactive condition.”** An Effect describes a computation. After it runs, it does not automatically report when the external data it read has changed. The source of changes must be explicit: for example, a `SubscriptionRef`, an event stream, or a controlled requirement algebra added later. `SubscriptionRef.changes` provides both the initial value and subsequent changes. [S5]
 
-**«Закрыть `Scope` — значит гарантированно мгновенно уничтожить всё».** Scope запускает зарегистрированные функции завершения. Это не механизм принудительного завершения произвольного JS, неучтённого Promise или внешнего процесса. Возможность прерывания, ошибки освобождения ресурсов и корректная регистрация ресурсов по-прежнему имеют значение. [S6–S7]
+**“Closing a `Scope` guarantees that everything is destroyed instantly.”** A Scope runs registered finalizers. It is not a mechanism for forcibly terminating arbitrary JS, an untracked Promise, or an external process. Interruptibility, resource release errors, and correct resource registration still matter. [S6–S7]
 
-**«Cordis Fiber и Effect Fiber — одно и то же».** Не используй такое соответствие как основание реализации. Термины из разных библиотек не обязаны иметь одинаковую семантику.
+**“A Cordis Fiber and an Effect Fiber are the same thing.”** Do not use this equivalence as a basis for the implementation. Terms from different libraries do not necessarily have the same semantics.
 
-Предмет разработки сформулирован уже и точнее:
+The development objective is narrower and more precise:
 
-> Поддерживать изменяемый граф доступных сервисов, управлять поколениями реализаций с ограниченным временем жизни и согласованно останавливать и пересобирать зависимые поколения.
+> Maintain a mutable graph of available services, manage implementation generations with bounded resource lifetimes, and coordinate the shutdown and rebuilding of dependent generations.
 
-Не заявляй научную новизну, уникальность в экосистеме или готовность к промышленной эксплуатации.
+Do not claim scientific novelty, uniqueness within the ecosystem, or production readiness.
 
-## 2. Основной пользовательский сценарий
+## 2. Primary User Scenario
 
-Граф:
+Graph:
 
 ```text
 Database → Analytics → ViewModel
 ```
 
-Здесь стрелка направлена от поставщика сервиса к зависимому сервису.
+Here, the arrow points from the service provider to the dependent service.
 
-Последовательность:
+Sequence:
 
 ```text
-зарегистрировать Analytics и ViewModel
-    Analytics = Pending: отсутствует Database
-    ViewModel = Pending: отсутствует Analytics
+register Analytics and ViewModel
+    Analytics = Pending: Database is missing
+    ViewModel = Pending: Analytics is missing
 
-зарегистрировать Database
+register Database
     Database#1  = Active
-    Analytics#1 = Active, использует Database#1
-    ViewModel#1 = Active, использует Analytics#1
+    Analytics#1 = Active, uses Database#1
+    ViewModel#1 = Active, uses Analytics#1
 
 disable(Database)
-    немедленно отозвать публикации затронутой ветки
-    закончить/прервать управляемых потребителей
-    закрыть ViewModel#1
-    закрыть Analytics#1
-    закрыть Database#1
+    immediately revoke publications for the affected branch
+    complete/interrupt managed consumers
+    close ViewModel#1
+    close Analytics#1
+    close Database#1
     Database = Disabled
-    Analytics и ViewModel = Pending
+    Analytics and ViewModel = Pending
 
 enable(Database)
     Database#2 → Analytics#2 → ViewModel#2
 ```
 
-Отдельная ветка графа не должна перезапускаться из-за этих изменений.
+An independent branch of the graph must not restart because of these changes.
 
-`replace(Database, новый рецепт)` выполняет аналогичную остановку и повторный запуск, даже если оба рецепта предоставляют один и тот же тег. **Новая реализация — новое поколение**, даже если возвращается тот же объект по ссылке.
+`replace(Database, new recipe)` performs a similar shutdown and restart, even if both recipes provide the same tag. **A new implementation means a new generation**, even if it returns the same object by reference.
 
-## 3. Технологическая основа и обязательная пробная проверка совместимости
+## 3. Technical Foundation and Required Compatibility Spike
 
-### 3.1. Выбор для 0.1
+### 3.1. Choice for 0.1
 
-**Исходное требование:** базовая реализация — **Effect 3.x**, TypeScript в строгом режиме, ESM. Это было сознательное ограничение первого выпуска, а не утверждение о том, какая основная версия Effect новейшая.
+**Original requirement:** the baseline implementation uses **Effect 3.x**, TypeScript in strict mode, and ESM. This was a deliberate constraint for the first release, not a statement about which major version of Effect is the latest.
 
-**Позднее одобренное уточнение, имеющее приоритет:** фактический выбор — **Effect 4.0.0-rc.115**. Он заменяет исходное требование выбрать стабильную версию 3.x. Ниже исходные указания по выбору v3 сохранены как исторические требования, а не как требование одновременно поддерживать v3 и v4.
+**Later approved clarification, which takes precedence:** the actual choice is **Effect 4.0.0-rc.115**. It replaces the original requirement to choose a stable 3.x version. The original v3 selection instructions below are retained as historical requirements, not as a requirement to support both v3 and v4 simultaneously.
 
-Проверенные исходники в этой спецификации относятся к официальной ветке `v3`. На момент подготовки её `packages/effect/package.json` содержит `3.22.2`, но это **не подтверждение публикации этой версии в npm**. По исходному требованию номер последнего опубликованного v3-релиза нужно было проверить перед установкой. Не смешивай ветку `main`, документацию Effect v4 и v3-пакеты: официальное руководство по миграции описывает изменения API между основными версиями. [S8–S9]
+The source files checked for this specification belong to the official `v3` branch. At the time of preparation, its `packages/effect/package.json` contains `3.22.2`, but this is **not confirmation that this version has been published to npm**. Under the original requirement, the latest published v3 release number had to be checked before installation. Do not mix the `main` branch, Effect v4 documentation, and v3 packages: the official migration guide describes API changes between major versions. [S8–S9]
 
-Перед реализацией:
+Before implementation:
 
 ```sh
 pnpm view effect dist-tags --json
 pnpm view effect versions --json
 ```
 
-Исходное указание по установке: выбрать опубликованную стабильную версию `3.x`, зафиксировать точную версию в `devDependencies` и файл блокировки зависимостей. Позднее одобренный выбор Effect 4.0.0-rc.115 имеет приоритет в части версии; требования зафиксировать точную версию в `devDependencies` и файл блокировки зависимостей сохраняются. Для `@effect/vitest` проверь совместимые `peerDependencies`. Не устанавливай `effect@rc` или `effect@beta` неявно. Если npm недоступен, явно запиши это ограничение; не выдавай непроверенный набор версий за проверенный.
+Original installation instruction: choose a published stable `3.x` version, pin the exact version in `devDependencies`, and commit the dependency lockfile. The later approved choice of Effect 4.0.0-rc.115 takes precedence with respect to the version; the requirements to pin the exact version in `devDependencies` and commit the dependency lockfile remain in force. For `@effect/vitest`, check compatible `peerDependencies`. Do not implicitly install `effect@rc` or `effect@beta`. If npm is unavailable, explicitly record this limitation; do not present an unverified set of versions as verified.
 
-Пакет должен указывать `effect` в `peerDependencies`: эту зависимость предоставляет приложение. Для разработки проверенная версия отдельно фиксируется в `devDependencies`; собственная копия Effect не должна попадать в сборку библиотеки. Диапазон `peerDependencies` не должен обещать поддержку версий, в которых отсутствуют используемые API. Сначала заявляй только протестированный диапазон, затем расширяй его после проверок в CI.
+The package must list `effect` in `peerDependencies`: this dependency is supplied by the consuming application. For development, the verified version is pinned separately in `devDependencies`; the library build must not bundle its own copy of Effect. The `peerDependencies` range must not promise support for versions that lack the APIs used. Initially declare only the tested range, then expand it after CI checks.
 
-### 3.2. Что проверить небольшими исполняемыми тестами до написания основного кода
+### 3.2. What to Verify with Small Executable Tests Before Writing the Main Code
 
-Создай `docs/compatibility.md` с точными версиями и результатами:
+Create `docs/compatibility.md` with exact versions and results:
 
-- `Layer.buildWithMemoMap` вместе со `Scope`, который явно принадлежит поколению.
-- Запуск функций завершения при успешной работе, ошибке создания ресурсов и прерывании.
-- Повторная сборка одного и того же объекта `Layer` с разными входными `Context` и разными `MemoMap`.
-- Продолжение работы задачи Effect, запущенной через `forkScoped`, после завершения создания ресурсов и её остановка вместе с поколением.
-- Получение начального значения и изменений `SubscriptionRef.changes` без промежутка между чтением и подпиской, в котором можно пропустить изменение.
-- Поведение `Reloadable`, `ScopedRef` и `LayerMap`: что можно использовать повторно и чего не хватает для контрактов этой библиотеки.
-- Сохранение `Context`/`FiberRefs` вызывающей стороны в управляемом пользовательском вызове.
+- `Layer.buildWithMemoMap` together with a `Scope` explicitly owned by the generation.
+- Finalizer execution on success, resource acquisition failure, and interruption.
+- Rebuilding the same `Layer` object with different input `Context` values and different `MemoMap` values.
+- Continued execution of an Effect task started through `forkScoped` after resource acquisition completes, and its shutdown together with the generation.
+- Receiving the initial value and changes from `SubscriptionRef.changes` without a gap between reading and subscribing in which a change could be missed.
+- The behavior of `Reloadable`, `ScopedRef`, and `LayerMap`: what can be reused and what is missing for this library’s contracts.
+- Preservation of the caller’s `Context`/`FiberRefs` in a managed user call.
 
-Используй **публичные** API Effect. Читать исходники допустимо; импортировать из `effect/internal/*`, подменять внутреннее поведение во время выполнения или разбирать приватное AST Layer — нет.
+Use **public** Effect APIs. Reading source code is acceptable; importing from `effect/internal/*`, replacing internal behavior at runtime, or inspecting the private Layer AST is not.
 
-Не пытайся поддержать v3 и v4 одновременно в первом выпуске. Не продолжай писать неподтверждённые сигнатуры «по памяти».
+Do not attempt to support v3 and v4 simultaneously in the first release. Do not continue writing unverified signatures “from memory.”
 
-## 4. Границы версии 0.1
+## 4. Scope of Version 0.1
 
-### Входит
+### Included
 
-Регистрация готовых TS-описаний во время работы; один публикуемый тег на компонент; обязательные зависимости; отслеживание наличия или отсутствия поставщика сервиса; независимое логическое условие запуска; включение и отключение; замена рецепта; отмена регистрации; каскадная инвалидация; создание ресурсов в `Scope`; диагностика состояния; безопасный управляемый вызов сервиса; ручной повтор неудавшегося создания ресурсов.
+Runtime registration of predefined TS descriptions; one published tag per component; required dependencies; tracking the presence or absence of a service provider; an independent Boolean start condition; enabling and disabling; recipe replacement; unregistration; cascading invalidation; resource acquisition within a `Scope`; state diagnostics; safe managed service calls; manual retry of failed resource acquisition.
 
-### Не входит
+### Excluded
 
-Несколько поставщиков сервиса для одного тега, приоритеты и автоматическое переключение на резервного поставщика; необязательные требования, требования с ИЛИ и динамический `flatMap` требований; произвольный Effect как автоматически реактивное условие; автоматическая проверка работоспособности; сохранение состояния рабочих процессов; RPC/NATS/HTTP; загрузка кода из файлов/npm; HMR; UI-компоненты; распределённые аренды ресурсов; изолированная среда для недоверенных плагинов; замена без простоя; автоматическое повторение бизнес-команд; полная совместимость со всеми изменениями FiberRefs, которые могут вносить произвольные Layer.
+Multiple service providers for a single tag, priorities, and automatic failover to a backup provider; optional requirements, OR requirements, and dynamic requirement `flatMap`; arbitrary Effect computations as automatically reactive conditions; automatic health checks; workflow state persistence; RPC/NATS/HTTP; loading code from files/npm; HMR; UI components; distributed resource leases; a sandbox for untrusted plugins; zero-downtime replacement; automatic retries of business commands; full compatibility with all FiberRefs changes that arbitrary Layer values may introduce.
 
-Файлы, сетевые события и проверки работоспособности в будущем — **адаптеры источников изменений**, а не часть ядра.
+Files, network events, and health checks are future **change-source adapters**, not part of the core.
 
-Для первого выпуска допустимо полностью пересчитывать небольшой DAG после изменения. Механизм инкрементальных вычислений не нужен. При этом нельзя полностью пересоздавать все работающие сервисы: незатронутые поколения должны сохраняться.
+For the first release, it is acceptable to recompute a small DAG in full after a change. An incremental computation mechanism is not needed. However, this must not recreate all running services: unaffected generations must be preserved.
 
-## 5. Модель типов
+## 5. Type Model
 
-Предпочтительное имя основного типа:
+Preferred name for the main type:
 
 ```ts
 DynamicLayer<ROut, E, RIn>
 ```
 
-Смысл параметров близок к `Layer<ROut, E, RIn>`:
+The parameters have meanings similar to those of `Layer<ROut, E, RIn>`:
 
-- `ROut` — идентификатор предоставляемого Effect-сервиса, а не произвольное значение сервиса.
-- `E` — ошибки построения конкретного компонента.
-- `RIn` — типизированные идентификаторы его внешних зависимостей.
+- `ROut` is the identifier of the provided Effect service, not an arbitrary service value.
+- `E` represents errors in building the specific component.
+- `RIn` represents the typed identifiers of its external dependencies.
 
-Сам `DynamicLayer` — **описание**, а не изменяемый `Layer` и не работающий сервис. Он не должен выдавать себя за подтип `Layer`. Жизненным циклом описания управляет отдельный `DynamicRuntime`.
+A `DynamicLayer` is itself a **description**, not a mutable `Layer` or a running service. It must not pretend to be a subtype of `Layer`. A separate `DynamicRuntime` manages the description’s lifecycle.
 
-Функция или Effect находятся в **полях значения или конструкторах**, а не заменяют третий параметр типа словом `function`.
+Functions or Effect values belong in **value fields or constructors**; they do not replace the third type parameter with the word `function`.
 
-### 5.1. Минимальная алгебра Requirement
+### 5.1. Minimal Requirement Algebra
 
 ```ts
 Requirement.empty                         // Requirement<never>
@@ -171,34 +173,34 @@ Requirement.all(
 )                                         // Requirement<Database | Auth>
 ```
 
-Это небольшое неизменяемое дерево требований из известных тегов сервисов. Оно хранит ключи, доступные во время выполнения, и обеспечивает типовую связь с входами реализации. Не запускай произвольные пользовательские эффекты для его вычисления.
+This is a small immutable requirement tree made up of known service tags. It stores runtime-accessible keys and establishes a type-level relationship with the implementation’s inputs. Do not run arbitrary user effects to compute it.
 
-В версии 0.1 достаточно вариантов `Empty`, `Service` и `All`. `all` должен удалять повторы одного тега и поддерживать вложенную композицию. Пустой `all` эквивалентен `empty`.
+For version 0.1, the `Empty`, `Service`, and `All` variants are sufficient. `all` must deduplicate occurrences of the same tag and support nested composition. An empty `all` is equivalent to `empty`.
 
-Зависимости в типах не превращаются в данные для работающей программы сами собой, поэтому необходимо передавать значения тегов. Не пытайся извлечь список зависимостей из стёртого объединения типов TypeScript или внутреннего дерева описания Effect.
+Type-level dependencies do not turn into runtime data on their own, so tag values must be passed explicitly. Do not attempt to extract the dependency list from an erased TypeScript type union or Effect’s internal description tree.
 
-### 5.2. Типовая проверка описания
+### 5.2. Type Checking the Description
 
-Конструктор должен проверять:
+The constructor must verify:
 
 ```text
-все внешние входы переданного Layer перечислены в `requires`
-выходной Tag действительно совместим с выходами Layer
-`acquire` в `fromEffect` возвращает сервис нужной формы
-Scope для `acquire` предоставляет `DynamicRuntime`, а не пользовательский поставщик сервиса
+all external inputs of the supplied Layer are listed in `requires`
+the output Tag is actually compatible with the Layer outputs
+`acquire` in `fromEffect` returns a service of the required shape
+Scope for `acquire` is supplied by `DynamicRuntime`, not by a user-provided service provider
 ```
 
-Допустимо объявлять дополнительные зависимости ради управления жизненным циклом. Нельзя пропускать используемую внешнюю зависимость. Зависимости, уже обеспеченные внутренним `Layer.provide`, повторно объявлять не требуется.
+Declaring additional dependencies for lifecycle management is acceptable. Omitting an external dependency that is used is not. Dependencies already supplied by an internal `Layer.provide` do not need to be declared again.
 
-Важная проверка типов: компилятор не должен «лечить» пропущенную зависимость расширением обобщённого параметра до `unknown`/`any`. При необходимости используй отдельный вывод типов для requires и `NoInfer` либо проверку непокрытого остатка входов.
+Important type check: the compiler must not “fix” an omitted dependency by widening a generic parameter to `unknown`/`any`. If necessary, use separate type inference for requires and `NoInfer`, or check for the remaining uncovered inputs.
 
-Не требуй от пользователя приведения типов для обычного сценария. Неоднородный реестр неизбежно стирает часть типов: локализуй эту границу в `internal/erased.ts`, задокументируй её и подкрепи проверками ключей и наличия опубликованного тега во время выполнения. Не превращай публичный API в `any`.
+Do not require users to use type assertions for the ordinary scenario. A heterogeneous registry inevitably erases some types: isolate this boundary in `internal/erased.ts`, document it, and back it with runtime checks of keys and the presence of the published tag. Do not turn the public API into `any`.
 
-## 6. Желаемый API
+## 6. Desired API
 
-**Все имена `DynamicLayer`, `Requirement`, `DynamicRuntime` ниже относятся к создаваемой библиотеке, а не к существующему пакету Effect.** Предпочтительно сохранить эту форму API; корректность типов важнее точного количества скобок.
+**All names `DynamicLayer`, `Requirement`, and `DynamicRuntime` below refer to the library to be created, not to the existing Effect package.** Prefer to retain this API shape; type correctness matters more than the exact number of parentheses.
 
-### 6.1. Обычный `Layer` как реализация
+### 6.1. A Regular `Layer` as the Implementation
 
 ```ts
 import { Context, Effect, Layer, SubscriptionRef } from "effect"
@@ -286,15 +288,15 @@ const program = Effect.scoped(
   })
 )
 
-// В исполняемом example обработать Exit/ошибки и выполнить program.
-// Закрытие внешнего Scope должно закрыть runtime в правильном порядке.
+// In the executable example, handle Exit/errors and run program.
+// Closing the outer Scope must shut down the runtime in the correct order.
 ```
 
-Это образец приёмочного примера. Агент обязан включить реальный `examples/basic.ts` в проверку типов и запустить его. Строки логов приведены только для иллюстрации; счётчики и инварианты проверяются отдельными тестами.
+This is a template for the acceptance example. The agent must include the actual `examples/basic.ts` in type checking and run it. The log lines are illustrative only; counters and invariants are checked by separate tests.
 
-### 6.2. Effect вместо вручную созданного `Layer`
+### 6.2. An Effect Instead of a Manually Created `Layer`
 
-Второй конструктор — тонкая оболочка над созданием ресурсов в `Scope`:
+The second constructor is a thin wrapper around resource acquisition in a `Scope`:
 
 ```ts
 const analytics = DynamicLayer.fromEffect(Analytics)({
@@ -307,11 +309,11 @@ const analytics = DynamicLayer.fromEffect(Analytics)({
 })
 ```
 
-Он должен использовать тот же исполнительный механизм, что и `fromLayer`, концептуально через `Layer.scoped`. Для реализации на Effect не нужно создавать отдельный жизненный цикл.
+It must use the same execution mechanism as `fromLayer`, conceptually through `Layer.scoped`. An Effect-based implementation does not need a separate lifecycle.
 
-### 6.3. Effect, вычисляющий рецепт слоя
+### 6.3. An Effect That Computes a Layer Recipe
 
-Не вводите третий несовместимый механизм. В исходном требовании использовался Effect v3, где это уже выражается через `Layer.unwrapEffect` или `Layer.unwrapScoped`: [S1]
+Do not introduce a third, incompatible mechanism. The original requirement used Effect v3, where this can already be expressed through `Layer.unwrapEffect` or `Layer.unwrapScoped`: [S1]
 
 ```ts
 const selectedLayer = Layer.unwrapEffect(
@@ -322,461 +324,461 @@ const selectedLayer = Layer.unwrapEffect(
 )
 ```
 
-Исходное требование Effect v3 сохранено как историческое. Позднее одобренный фактический выбор Effect 4.0.0-rc.115 имеет приоритет как уточнение версии.
+The original Effect v3 requirement is retained for historical reference. The subsequently approved actual choice of Effect 4.0.0-rc.115 takes precedence as a version clarification.
 
-Такой рецепт передаётся в `DynamicLayer.fromLayer`. `requires` покрывает оставшиеся внешние входы **всего** рецепта. Если статический тип входов представляет собой объединение входов обеих ветвей, версия 0.1 консервативно требует всё это объединение. Ветвление `Layer` не означает, что автоматически отслеживается только ветвь, выбранная во время выполнения.
+Such a recipe is passed to `DynamicLayer.fromLayer`. `requires` covers the remaining external inputs of the **entire** recipe. If the static input type is a union of the inputs of both branches, version 0.1 conservatively requires that entire union. Branching in a `Layer` does not mean that only the branch selected at runtime is automatically tracked.
 
-Выбирающий Effect выполняется при новой сборке поколения. Он не выполняется постоянно, а обычное изменение скрытой переменной не запускает повторную сборку. Для такого изменения нужна замена поставщика сервиса конфигурации, явный вызов `replace` или наблюдаемое условие запуска.
+The selecting Effect runs when a new generation is built. It does not run continuously, and an ordinary change to a hidden variable does not trigger a rebuild. Such a change requires replacing the configuration service provider, an explicit call to `replace`, or an observable startup gate.
 
-## 7. Контракт DynamicRuntime
+## 7. DynamicRuntime Contract
 
-`DynamicRuntime.make()` возвращает Effect, привязанный к `Scope`. Работающий экземпляр не создаётся при импорте модуля. Два экземпляра `DynamicRuntime` в одном процессе полностью независимы.
+`DynamicRuntime.make()` returns an Effect tied to a `Scope`. A running instance is not created when the module is imported. Two `DynamicRuntime` instances in the same process are completely independent.
 
-Минимальный публичный набор:
+Minimum public API:
 
-| Операция | Смысл |
+| Operation | Meaning |
 |---|---|
-| `register(description)` | Проверить описание и атомарно добавить его в граф требуемого состояния. Обязательный `description.id` остаётся диагностическими метаданными. По умолчанию регистрация включена. |
-| `enable(Service)` / `disable(Service)` | Найти регистрацию по фактическому ключу сервиса и изменить желаемое состояние включения. Повтор той же команды ничего не меняет. |
-| `replace(Service, description)` | Типобезопасно сменить рецепт того же сервиса; сохранить идентичность узла, его `id` и ключ публикуемого сервиса, остановив старый экземпляр перед запуском нового. |
-| `unregister(Service)` | Отозвать компонент, сохранив запись узла, завершающего работу, до корректного завершения внутренней очистки. |
-| `retry(Service)` | Разрешить новую попытку после ошибки создания ресурсов для того же набора входов. |
-| `snapshot` | Получить неизменяемый диагностический снимок состояния без объектов сервисов. |
-| `changes` | Поток актуальных снимков состояния: начальное состояние и последующие версии. |
-| `awaitState(Service, LifecycleState.Active)` | Дождаться состояния выбранной регистрации, с корректной отменой и ошибкой при удалении регистрации или закрытии `DynamicRuntime`. |
-| `awaitIdle()` | Барьер: на наблюдаемом шаге нет незавершённых операций жизненного цикла или уже принятых, но ещё не обработанных изменений. |
-| `use(Service, callback)` | Выполнить Effect с закреплённым текущим поколением сервиса и управляемой отменой. |
-| `shutdown` | Идемпотентно завершить работу в установленном порядке; также вызывается при закрытии `Scope`, владеющего экземпляром `DynamicRuntime`. |
+| `register(description)` | Validate the description and atomically add it to the desired-state graph. The required `description.id` remains diagnostic metadata. A registration is enabled by default. |
+| `enable(Service)` / `disable(Service)` | Find the registration by the actual service key and change its desired enabled state. Repeating the same command changes nothing. |
+| `replace(Service, description)` | Replace the recipe for the same service in a type-safe manner; preserve the node's identity, its `id`, and the published service key, stopping the old instance before starting the new one. |
+| `unregister(Service)` | Revoke the component, retaining the retiring node's record until internal cleanup completes correctly. |
+| `retry(Service)` | Allow another attempt after a resource acquisition failure for the same set of inputs. |
+| `snapshot` | Obtain an immutable diagnostic state snapshot without service objects. |
+| `changes` | A stream of current state snapshots: the initial state and subsequent versions. |
+| `awaitState(Service, LifecycleState.Active)` | Wait for the selected registration's state, with proper cancellation and an error if the registration is removed or `DynamicRuntime` is closed. |
+| `awaitIdle()` | A barrier: at the observation point, there are no unfinished lifecycle operations or changes that have already been accepted but not yet processed. |
+| `use(Service, callback)` | Run an Effect with the current service generation pinned and with managed cancellation. |
+| `shutdown` | Shut down idempotently in the prescribed order; also invoked when the `Scope` that owns the `DynamicRuntime` instance closes. |
 
-### 7.1. Подтверждение команды не означает завершения ввода-вывода
+### 7.1. Command Acknowledgment Does Not Mean I/O Completion
 
-`register`, `enable`, `disable`, `replace`, `unregister`, `retry` подтверждают **приём и применение контроллером изменения желаемого состояния**, а не завершение всех операций создания ресурсов и финализаторов. Контроллер разрешает ключ сервиса по полной карте регистраций, служащей источником истины, включая записи в состояниях `Pending`, `Disabled` и записи в процессе удаления. Искать только среди публикаций запрещено.
+`register`, `enable`, `disable`, `replace`, `unregister`, and `retry` acknowledge **the controller's acceptance and application of a desired-state change**, not the completion of all resource acquisition operations and finalizers. The controller resolves the service key against the full registration map, which is the source of truth, including records in the `Pending` and `Disabled` states and records undergoing removal. Looking only among publications is prohibited.
 
-При этом отзыв старых публикаций по команде, которая делает их недействительными, входит в тот же атомарный шаг. После успешного возврата `disable` новый `use` не должен получить старое поколение затронутой ветки.
+However, revoking old publications in response to a command that invalidates them is part of the same atomic step. After `disable` returns successfully, a new `use` must not obtain an old generation from the affected branch.
 
-`awaitState` и `awaitIdle` используются отдельно. `awaitState` закрепляет выбранную стабильную запись регистрации: замена продолжает ожидание на той же записи, но удаление регистрации и последующая регистрация того же ключа сервиса не перенаправляют ранее начатое ожидание.
+`awaitState` and `awaitIdle` are used separately. `awaitState` pins the selected stable registration record: replacement continues the wait on the same record, but removing the registration and subsequently registering the same service key does not redirect a previously started wait.
 
-`awaitIdle` не означает «все узлы Active»: состояния `Pending`/`Disabled`/`Failed` допустимы. Он не ждёт завершения долгоживущих рабочих задач Effect или управляющих подписок. Будущие внешние изменения могут сразу нарушить состояние покоя; этот барьер не блокирует всю систему.
+`awaitIdle` does not mean “all nodes are Active”: `Pending`/`Disabled`/`Failed` states are allowed. It does not wait for long-lived Effect worker tasks or control subscriptions to finish. Future external changes may immediately break the idle state; this barrier does not lock the entire system.
 
-Изменение `SubscriptionRef` подтверждается самой ссылкой, а не контроллером `DynamicRuntime`. Поэтому после `SubscriptionRef.set` нужно дождаться соответствующего состояния, а не предполагать, что условие запуска обработано синхронно.
+A change to a `SubscriptionRef` is acknowledged by the reference itself, not by the `DynamicRuntime` controller. Therefore, after `SubscriptionRef.set`, you must wait for the corresponding state rather than assume that the startup gate has been processed synchronously.
 
-`awaitState` должен сначала проверить искомое состояние. Если вместо ожидаемого состояния узел переходит в `Failed`, ожидание должно завершиться диагностируемой ошибкой, а не зависнуть навсегда. Ожидание `LifecycleState.Failed` допустимо. Должна быть возможность ограничить время ожидания обычным механизмом тайм-аута Effect.
+`awaitState` must first check for the requested state. If the node transitions to `Failed` instead of the expected state, the wait must terminate with a diagnosable error rather than hang forever. Waiting for `LifecycleState.Failed` is allowed. It must be possible to bound the wait using Effect's standard timeout mechanism.
 
-После перехода `DynamicRuntime` в `Closing` новые управляющие команды, новые вызовы `use` и ожидания невозможных состояний завершаются `RuntimeClosing`/`RuntimeClosed`, а не теряются в очереди. Для ключа сервиса, который никогда не был зарегистрирован, возвращается `ServiceNotRegistered { serviceKey }`; для управляющей команды, обращённой к записи в процессе удаления, — `NodeRetiring`; для недостижимого ожидания удаляемой записи — `AwaitStateUnavailable { id, expected }`.
+After `DynamicRuntime` transitions to `Closing`, new control commands, new `use` calls, and waits for impossible states fail with `RuntimeClosing`/`RuntimeClosed` rather than getting lost in the queue. A service key that has never been registered returns `ServiceNotRegistered { serviceKey }`; a control command targeting a record undergoing removal returns `NodeRetiring`; an unreachable wait on a record being removed returns `AwaitStateUnavailable { id, expected }`.
 
-## 8. Состояния узла
+## 8. Node States
 
-Используйте размеченное объединение типов, а не набор независимых логических полей:
-
-```text
-Disabled — `desiredEnabled=false`, живого поколения уже нет.
-Pending  — регистрация включена, но отсутствуют зависимости или условие запуска ещё не разрешает запуск.
-Starting — создаются ресурсы конкретного поколения.
-Active   — поколение полностью построено и опубликовано.
-Stopping — публикация уже отозвана; ещё идут прерывание, ожидание завершения и освобождение ресурсов.
-Failed   — диагностируемая ошибка с указанием этапа и Cause.
-```
-
-Для `Failed` нужно различать как минимум этапы `acquire`, `gate` и `release`. `Pending` содержит причины, например `MissingService`, `DependencyNotActive`, `GateInitializing`, `GateClosed`. Если зависимость находится в состоянии ошибки, это должно быть видно в диагностике ссылки на неё, а не скрыто за бесконечным состоянием «загрузка».
-
-Включённая регистрация сначала находится в `Pending` до проверки условий, а затем переходит в `Starting`, если требования ко входам выполнены. Ошибка создания ресурсов не приводит к публикации частично построенного сервиса.
-
-Временное отсутствие обязательного сервиса — нормальное состояние `Pending`, **не исключение**.
-
-`Disabled` устанавливается только после окончания остановки. Пока выполняются финализаторы, состояние остаётся `Stopping`, даже если желаемое состояние включения уже установлено в `false`.
-
-Удалённый узел не должен навсегда оставаться в снимке состояния. Сохраняйте внутреннюю запись узла, завершающего работу, пока завершение старого поколения необходимо для безопасности, затем удаляйте её. Поздние сообщения идентифицируются по поколению, а не по строковому id, который мог совпасть с id новой регистрации.
-
-Пока узел находится в процессе удаления, его id и ключ публикуемого сервиса остаются зарезервированными. Новая регистрация с ними до окончания очистки получает `NodeRetiring`, а не запускает параллельный экземпляр. После завершения очистки (`awaitIdle`) их можно использовать снова. Это ограничение не отменяет проверку идентичности регистрации и поколения у поздних сообщений.
-
-## 9. Граф, поколения и идентичность
-
-Разделите как минимум три сущности:
-
-**Описание узла:** идентификатор узла, публикуемый тег, требования к зависимостям, условие запуска, рецепт, ревизия описания.
-
-**Попытка/поколение:** уникальный идентификатор поколения, Scope жизненного цикла, задача Effect для сборки, выбранные входные поколения, статус, токен/эпоха отмены.
-
-**Публикация:** ключ сервиса → опубликованное поколение в состоянии `Active` и значение сервиса.
-
-Уникальные идентификаторы поколений должны различать старую и новую регистрацию одного идентификатор узла. Достаточно монотонного счётчика `DynamicRuntime`; он не сбрасывается при удалении и повторной регистрации.
-
-Отпечаток сборки включает как минимум:
+Use a discriminated union, not a set of independent boolean fields:
 
 ```text
-идентичность регистрации узла
-версия рецепта / эпоха активации
-ключ обязательного сервиса → идентификатор поколения выбранного поставщика
-версия условия запуска, влияющая на допустимость этой попытки
+Disabled — `desiredEnabled=false`, no live generation remains.
+Pending  — the registration is enabled, but dependencies are missing or the startup gate does not yet permit startup.
+Starting — resources for a specific generation are being acquired.
+Active   — the generation has been fully built and published.
+Stopping — publication has already been revoked; interruption, waiting for completion, and resource release are still in progress.
+Failed   — a diagnosable failure specifying the phase and Cause.
 ```
 
-Нельзя опираться только на идентичность объектов, количество узлов, глобальную версию реестра или логический признак «зависимость существует».
+For `Failed`, distinguish at least the `acquire`, `gate`, and `release` phases. `Pending` contains reasons such as `MissingService`, `DependencyNotActive`, `GateInitializing`, and `GateClosed`. If a dependency is in a failed state, this must be visible in the diagnostics for the reference to it, rather than hidden behind an endless “loading” state.
 
-### Валидация графа
+An enabled registration initially remains in `Pending` until its conditions are checked, then transitions to `Starting` if its input requirements are met. Resource acquisition failure does not result in publication of a partially built service.
 
-При `register`/`replace` постройте предполагаемый новый граф и до изменения действующего состояния проверьте:
+The temporary absence of a required service is a normal `Pending` state, **not an exception**.
 
-- уникальность идентификатор узла;
-- наличие не более одного зарегистрированного поставщика сервиса для каждого ключа сервиса, включая отключённых поставщиков;
-- отсутствие зависимости узла от самого себя;
-- отсутствие циклов среди рёбер зарегистрированных узлов, для которых удалось разрешить зависимости;
-- соответствие id и ключа экспорта при замене.
+`Disabled` is set only after stopping has completed. While finalizers are running, the state remains `Stopping`, even if the desired enabled state has already been set to `false`.
 
-Отсутствующие поставщики сервисов разрешены. Если последующая регистрация такого поставщика замыкает цикл, нужно **отклонить именно новую команду**, не нарушая прежнее состояние.
+A removed node must not remain in the state snapshot forever. Keep the retiring node's internal record for as long as completion of the old generation is necessary for safety, then remove it. Late messages are identified by generation, not by a string id that may match the id of a new registration.
 
-Ключ тега служит ключом `Context` во время выполнения; одинаковые строки могут скрывать разные типы TypeScript. Нельзя молча принимать коллизии экспорта. Используйте стабильные ключи с пространствами имён и тестируйте коллизии. TypeScript не доказывает безопасность произвольно загруженного JavaScript.
+While a node is undergoing removal, its id and published service key remain reserved. A new registration using them before cleanup finishes receives `NodeRetiring` rather than starting a parallel instance. After cleanup completes (`awaitIdle`), they may be reused. This restriction does not eliminate the need to check registration and generation identity for late messages.
 
-## 10. Контроллер и исполнительный слой
+## 9. Graph, Generations, and Identity
 
-Рекомендуемая архитектура:
+Separate at least three entities:
+
+**Node description:** node identifier, published tag, dependency requirements, startup gate, recipe, description revision.
+
+**Attempt/generation:** unique generation identifier, resource lifetime Scope, Effect task for building, selected input generations, status, cancellation token/epoch.
+
+**Publication:** service key → published generation in the `Active` state and service value.
+
+Unique generation identifiers must distinguish old and new registrations with the same node identifier. A monotonic `DynamicRuntime` counter is sufficient; it is not reset on removal and re-registration.
+
+The build fingerprint includes at least:
 
 ```text
-команды + изменения условия запуска + завершения операций жизненного цикла
-                        ↓
-             сериализованный контроллер
-             основное состояние + планировщик
-                        ↓
-                  запуск / отзыв / остановка
-                        ↓
-            управляемые Effect-исполнители
-                        ↓
-               сообщение о завершении контроллеру
+node registration identity
+recipe version / activation epoch
+required service key → generation identifier of the selected provider
+startup gate version affecting the validity of this attempt
 ```
 
-Только контроллер имеет право изменять состояние, служащее источником истины, и публикации. Допустима очередь с одной задачей Effect для контроллера. Нельзя запускать несколько параллельных процедур согласования состояния над одной `Map`.
+Do not rely solely on object identity, node count, a global registry version, or a boolean indicating that “the dependency exists.”
 
-**Контроллер не ждёт длительного пользовательского ввода-вывода.** Создание ресурсов, остановка и финализаторы выполняются в управляемых исполнителях, которые присылают сообщения о завершении. Иначе невозможно обработать `disable` во время зависшего `Starting`.
+### Graph Validation
 
-Не удерживайте глобальный семафор или блокировку во время пользовательского создания и освобождения ресурсов либо выполнения переданной функции. Последовательное принятие решений не должно блокировать приём отмены.
+On `register`/`replace`, construct the proposed new graph and, before changing the current state, check:
 
-Команды жизненного цикла и сообщения о завершении нельзя молча терять в очереди, которая отбрасывает новые или вытесняет старые элементы. Для версии 0.1 допустим простой почтовый ящик без сложного механизма обратного давления, но это ограничение нужно документировать. Диагностические снимки состояния относятся к другой категории: их можно объединять, если семантика такого объединения описана явно.
+- uniqueness of the node identifier;
+- that there is no more than one registered service provider for each service key, including disabled providers;
+- that no node depends on itself;
+- that there are no cycles among the edges of registered nodes whose dependencies could be resolved;
+- that the id and export key match when replacing.
 
-Функцию вычисления графа и транзитивного множества затронутых узлов желательно сделать чистой и тестировать отдельно от исполнения.
+Missing service providers are allowed. If a subsequent registration of such a provider closes a cycle, **reject that new command specifically**, leaving the previous state intact.
 
-## 11. Алгоритм запуска и атомарной публикации
+The tag key serves as the `Context` key at runtime; identical strings may conceal different TypeScript types. Export collisions must not be silently accepted. Use stable, namespaced keys and test collisions. TypeScript does not prove the safety of arbitrarily loaded JavaScript.
 
-Для запуска поколения:
+## 10. Controller and Execution Layer
 
-1. На одном шаге контроллера проверьте состояние включения, условие запуска и публикации в состоянии `Active` для всех обязательных зависимостей.
-2. Зафиксируйте **конкретные** входные поколения и зарегистрируйте поколение в состоянии `Starting` как зависимый от них сервис ещё до начала ввода-вывода.
-3. Создайте Scope, принадлежащий этой попытке, и новый `MemoMap`; учёт владения ресурсами должен быть защищён от отмены между выделением ресурсов и постановкой их на учёт.
-4. Постройте неизменяемый входной Context из выбранных сервисов. Это заимствованные ссылки: зависимый сервис не создаёт заново ресурсы поставщика сервиса.
-5. В управляемой задаче Effect постройте Layer с этим Context и Scope.
-6. Перед публикацией контроллер повторно проверяет токен, рецепт, условие запуска и идентичность всех выбранных поколений.
-7. Если всё актуально, атомарно опубликуйте единственный заявленный экспорт и установите состояние `Active`.
-8. Если сборка устарела, её результат **никогда** не публикуется; принадлежащие ей ресурсы нужно закрыть через обычный путь остановки.
-
-Полностью успешное создание ресурсов ещё не даёт права на публикацию.
-
-Если `Layer` построился, но заявленный экспорт отсутствует в выходном `Context`, это `InvalidExport` и ошибка создания ресурсов. Ошибку нужно отразить в диагностике, а `Scope` — закрыть. Нельзя определять доступность только по параметру обобщённого типа.
-
-Зависимости остаются живы на время создания ресурсов и отката зависимого сервиса. Нельзя закрыть поставщика сервиса, пока устаревший зависимый сервис ещё завершает собственное построение или очистку.
-
-## 12. Инвалидация, остановка и замена
-
-### 12.1. Логический отзыв раньше физического освобождения ресурсов
-
-При потере зависимости, отключении, замене или закрытии условия запуска:
-
-1. Найдите затронутое транзитивное множество зависимых сервисов, включая поколения в состоянии Starting и управляемые пользовательские вызовы.
-2. На одном атомарном шаге уберите публикации всей затронутой ветки и пометьте попытки устаревшими.
-3. Не допускайте новых построений и вызовов с использованием этих поколений.
-4. Остановите зависимые сервисы в обратном топологическом порядке.
-5. Только после завершения зависимых сервисов закрывайте поставщиков сервисов.
-
-Нельзя сначала закрыть DB, а затем уведомить использующий её Analytics.
-
-### 12.2. Что значит «остановить поколение»
-
-Нужно отменить незавершённое создание ресурсов, дождаться выхода из него и завершения отката, прервать принадлежащие поколению управляемые задачи Effect и дождаться их завершения, затем закрыть его `Scope` и выполнить финализаторы. Реальный механизм может использовать связанные `Scope` и задачи Effect, но эти наблюдаемые гарантии обязательны.
-
-Финализатор зависимого сервиса может использовать прежнего поставщика сервиса для завершающей операции. Поставщик сервиса должен оставаться живым до окончания этого финализатора.
-
-В ромбовидном графе общий поставщик сервиса закрывается один раз и только после обоих зависимых сервисов. Остановленные соседние ветви могут очищаться параллельно, но версия 0.1 вправе делать это последовательно.
-
-### 12.3. Политика замены в версии 0.1
-
-**Остановка перед новым запуском (stop-before-start)**, с допустимым промежутком недоступности:
+Recommended architecture:
 
 ```text
-отозвать старую затронутую ветку
-→ остановить зависимые сервисы
-→ остановить старого поставщика
-→ запустить нового поставщика
-→ запустить зависимые сервисы с новыми поколениями
+commands + startup gate changes + lifecycle operation completions
+                        ↓
+             serialized controller
+             core state + scheduler
+                        ↓
+                  start / revoke / stop
+                        ↓
+            managed Effect executors
+                        ↓
+               completion message to the controller
 ```
 
-Не реализуйте одновременно параллельную схему blue/green и остановку перед новым запуском. Автоматического отката на старый, уже закрытый экземпляр нет. Если новое построение не удалось, поставщик сервиса переходит в `Failed`, а зависимые сервисы — в `Pending`.
+Only the controller may modify the source-of-truth state and publications. A queue with a single Effect task for the controller is acceptable. Do not run multiple concurrent reconciliation procedures over the same `Map`.
 
-Новый экземпляр не запускается, пока предыдущий экземпляр того же узла не завершил остановку. Это важно для портов, файловых блокировок и эксклюзивных устройств.
+**The controller does not wait for long-running user I/O.** Resource acquisition, stopping, and finalizers run in managed executors that send completion messages. Otherwise, it would be impossible to process `disable` while `Starting` is stuck.
 
-### 12.4. Завершение работы корневой `DynamicRuntime`
+Do not hold a global semaphore or lock during user resource acquisition and release or while executing the supplied function. Sequential decision-making must not block acceptance of cancellation.
 
-Сначала запретите приём новых операций и отзовите все публикации. Остановите граф в правильном порядке, затем закройте управляющие подписки, исполнителей и контроллер и разблокируйте ожидающие переданные функции завершения работы.
+Lifecycle commands and completion messages must not be silently lost in a queue that drops new items or evicts old ones. For version 0.1, a simple mailbox without a complex backpressure mechanism is acceptable, but this limitation must be documented. Diagnostic state snapshots are a different category: they may be coalesced if the coalescing semantics are explicitly described.
 
-Не полагайтесь на случайный порядок «последним пришёл — первым вышел» (LIFO), определяемый созданием дочерних `Scope`: после нескольких замен он не обязан совпадать с обратным топологическим порядком.
+Prefer to make the function that computes the graph and the transitive set of affected nodes pure, and test it separately from execution.
 
-Контроллер должен оставаться работоспособным, пока нужны сообщения о завершении остановки. Нельзя сначала автоматически прервать контроллер через корневой `Scope`, а потом ждать от него освобождения остальных ресурсов. Подтвердите схему владения ресурсами отдельным тестом завершения работы.
+## 11. Startup and Atomic Publication Algorithm
 
-`shutdown` идемпотентен. Закрытие `Scope`, владеющего экземпляром `DynamicRuntime`, и явный вызов `shutdown` не должны освобождать ресурсы дважды.
+To start a generation:
 
-## 13. Логическое условие запуска: минимальная настоящая реактивность
+1. In a single controller step, check the enabled state, the startup condition, and the publications in the `Active` state for all required dependencies.
+2. Pin the **specific** input generations and register the generation in the `Starting` state as a service dependent on them before any I/O begins.
+3. Create a Scope owned by this attempt and a new `MemoMap`; resource ownership tracking must be protected against cancellation between allocating resources and recording their ownership.
+4. Build an immutable input Context from the selected services. These are borrowed references: the dependent service does not recreate the service provider's resources.
+5. In a managed Effect fiber, build the Layer using this Context and Scope.
+6. Before publication, the controller rechecks the token, recipe, startup condition, and identity of every selected generation.
+7. If everything is still current, atomically publish the single declared export and set the state to `Active`.
+8. If the build is stale, its result is **never** published; resources owned by it must be closed through the normal shutdown path.
 
-В версии 0.1 предусмотрено поле:
+Fully successful resource acquisition does not, by itself, authorize publication.
+
+If the `Layer` builds but the declared export is absent from the output `Context`, this is `InvalidExport` and a resource acquisition failure. The error must be reflected in diagnostics, and the `Scope` must be closed. Availability must not be determined solely from a generic type parameter.
+
+Dependencies remain alive throughout resource acquisition and rollback of the dependent service. A service provider must not be closed while a stale dependent service is still finishing its own build or cleanup.
+
+## 12. Invalidation, Stopping, and Replacement
+
+### 12.1. Logical Revocation Before Physical Resource Release
+
+When a dependency is lost, a service is disabled or replaced, or the startup condition becomes false:
+
+1. Find the affected transitive set of dependent services, including generations in the Starting state and managed user calls.
+2. In a single atomic step, remove the publications for the entire affected branch and mark the attempts as stale.
+3. Do not allow new builds or calls using these generations.
+4. Stop dependent services in reverse topological order.
+5. Close service providers only after their dependent services have finished.
+
+Do not close DB first and then notify Analytics, which uses it.
+
+### 12.2. What It Means to “Stop a Generation”
+
+Cancel any unfinished resource acquisition, wait for it to exit and complete its rollback, interrupt the managed Effect fibers owned by the generation and wait for them to finish, then close its `Scope` and run its finalizers. The actual mechanism may use linked `Scope`s and Effect fibers, but these observable guarantees are mandatory.
+
+A dependent service's finalizer may use its previous service provider for a final operation. The service provider must remain alive until that finalizer finishes.
+
+In a diamond-shaped graph, the shared service provider is closed once, and only after both dependent services have finished. Stopped sibling branches may be cleaned up in parallel, but version 0.1 may do this sequentially.
+
+### 12.3. Replacement Policy in Version 0.1
+
+**Stop-before-start**, with a permitted period of unavailability:
+
+```text
+revoke the old affected branch
+→ stop dependent services
+→ stop the old provider
+→ start the new provider
+→ start dependent services with new generations
+```
+
+Do not implement both a parallel blue/green scheme and stop-before-start. There is no automatic rollback to an old instance that has already been closed. If the new build fails, the service provider transitions to `Failed`, and dependent services transition to `Pending`.
+
+A new instance does not start until the previous instance of the same node has finished stopping. This matters for ports, file locks, and exclusive devices.
+
+### 12.4. Shutting Down the Root `DynamicRuntime`
+
+First, stop accepting new operations and revoke all publications. Stop the graph in the correct order, then close the control subscriptions, workers, and controller, and unblock waiting shutdown callbacks.
+
+Do not rely on the incidental last-in, first-out (LIFO) order determined by the creation of child `Scope`s: after several replacements, it need not match reverse topological order.
+
+The controller must remain operational for as long as stop-completion messages are needed. Do not automatically interrupt the controller through the root `Scope` first and then wait for it to release the remaining resources. Validate the resource ownership scheme with a dedicated shutdown test.
+
+`shutdown` is idempotent. Closing the `Scope` that owns the `DynamicRuntime` instance and explicitly calling `shutdown` must not release resources twice.
+
+## 13. Boolean Startup Condition: Minimal Genuine Reactivity
+
+Version 0.1 provides the field:
 
 ```ts
 when?: SubscriptionRef.SubscriptionRef<boolean>
 ```
 
-Без `when` условие запуска всегда выполнено. Если `when` задано, компонент ждёт первого значения из наблюдаемой ссылки и реагирует на последующие изменения.
+Without `when`, the startup condition is always satisfied. If `when` is specified, the component waits for the first value from the observable reference and reacts to subsequent changes.
 
-Обязательная семантика:
+Required semantics:
 
-- `false` запрещает запуск и делает активное или строящееся поколение недействительным.
-- `true` разрешает запуск, если доступны все обязательные сервисы.
-- Повторное `true` без смены состояния не перезапускает сервис в состоянии `Active`.
-- Переход `true → false → true` делает старую попытку недействительной, даже если её построение завершилось уже после последнего true.
-- Подписка на условие запуска живёт на уровне **регистрации**, а не активного поколения. Иначе после false некому будет заметить true.
-- Подписка сохраняется при отключении и освобождается при удалении регистрации, замене описания или завершении работы `DynamicRuntime`. События подписки содержат идентификатор регистрации и версию описания; запоздавшее событие от старого условия запуска после замены игнорируется.
-- Нельзя отдельно выполнять `get` и затем «подписаться на будущие события»: между этими действиями можно потерять изменение. Нужно использовать `.changes`, где присутствует начальное значение. [S5]
-- При получении события условия запуска нельзя выполнять ввод-вывод из переданной функции контроллера.
+- `false` prohibits startup and invalidates an active generation or one being built.
+- `true` permits startup if all required services are available.
+- Repeated `true` values without a state change do not restart a service in the `Active` state.
+- A `true → false → true` transition invalidates the old attempt, even if its build finishes after the last true.
+- The startup-condition subscription lives at the **registration** level, not the active-generation level. Otherwise, after false, nothing would remain to notice true.
+- The subscription is retained while disabled and released when the registration is removed, the description is replaced, or `DynamicRuntime` shuts down. Subscription events contain the registration identifier and description version; a delayed event from an old startup condition is ignored after replacement.
+- Do not perform `get` separately and then “subscribe to future events”: a change can be lost between these actions. Use `.changes`, which includes the initial value. [S5]
+- When a startup-condition event is received, do not perform I/O from the controller callback.
 
-Доступность — это состояние, известное контроллеру после обработки событий. Нельзя обещать атомарность с внешним миром или немедленную реакцию на физический обрыв сети.
+Availability is the state known to the controller after it processes events. Do not promise atomicity with the outside world or an immediate response to a physical network disconnection.
 
-Если клиент БД всё ещё зарегистрирован, но потерял соединение, библиотека не узнаёт об этом автоматически. Внешний адаптер должен изменить условие запуска либо заменить или отключить поставщика сервиса. Другой допустимый подход — стабильный сервис с внутренним восстановлением соединения и типизированными ошибками операций.
+If a DB client is still registered but has lost its connection, the library does not learn about this automatically. An external adapter must change the startup condition or replace or disable the service provider. Another valid approach is a stable service with internal reconnection and typed operation errors.
 
-Не следует добавлять цикл периодического опроса для проверки условия запуска.
+Do not add a periodic polling loop to check the startup condition.
 
-## 14. Безопасное использование сервиса снаружи графа
+## 14. Safe Use of a Service from Outside the Graph
 
-Замена ссылки в Context не изменяет уже выданные JS-объекты. Поэтому следующий способ не должен быть основным API:
+Replacing a reference in Context does not change JS objects that have already been handed out. Therefore, the following approach must not be the primary API:
 
 ```ts
 const db = yield* runtime.get(Database)
-// произвольное хранение db после закрытия его ресурсов
+// Retaining db arbitrarily after its resources have been closed
 ```
 
-Публичный способ использования в версии 0.1:
+The public usage pattern in version 0.1:
 
 ```ts
 yield* runtime.use(Analytics, (analytics) => analytics.read)
 ```
 
-Контракт `use`:
+The `use` contract:
 
-- Выбор поколения в состоянии `Active` и регистрация вызова как его потребителя выполняются одним атомарным шагом.
-- Если публикации в состоянии `Active` нет, вызов завершается с `ServiceUnavailable`, без бесконечного неявного ожидания.
-- Переданная функция запускается только после успешного допуска вызова.
-- Вызов имеет собственное управляемое время жизни и очищается при успехе, ошибке и отмене вызывающей стороны.
-- При отзыве поколения допуск новых вызовов закрывается, а уже допущенная переданная функция прерывается. `DynamicRuntime` ждёт её завершения и очистки до освобождения ресурсов поставщика сервиса.
-- Отмена вследствие отзыва является прерыванием Effect; её нельзя маскировать под успешный результат. Причина отзыва должна сохраняться в диагностике.
-- Переданная функция наследует Context/FiberRefs вызывающего кода, а не случайные настройки по умолчанию задачи Effect контроллера. Её дополнительные требования `R` остаются в возвращаемом типе; стирать их нельзя.
-- `Scope`, предоставленный управляемой операции с переданной функцией, закрывается вместе с вызовом. Дочерние задачи, привязанные к `Scope` вызова, не должны переживать его завершение.
-- Нельзя автоматически повторять бизнес-операцию на новом поколении. Прерывание не доказывает, что внешняя операция не произошла.
+- Selecting a generation in the `Active` state and registering the call as its consumer happen in a single atomic step.
+- If there is no publication in the `Active` state, the call fails with `ServiceUnavailable`, without indefinite implicit waiting.
+- The callback starts only after the call has been successfully admitted.
+- The call has its own managed lifetime and is cleaned up on success, failure, and cancellation by the caller.
+- When the generation is revoked, admission of new calls is closed, and an already admitted callback is interrupted. `DynamicRuntime` waits for it to finish and clean up before releasing the service provider's resources.
+- Cancellation due to revocation is Effect interruption; it must not be disguised as a successful result. The reason for revocation must be retained in diagnostics.
+- The callback inherits the calling code's Context/FiberRefs, not incidental defaults from the controller's Effect fiber. Its additional requirements `R` remain in the return type; they must not be erased.
+- The `Scope` provided to the managed callback operation is closed along with the call. Child fibers attached to the call's `Scope` must not outlive the call.
+- Do not automatically retry a business operation on a new generation. Interruption does not prove that an external operation did not occur.
 
-Между допуском вызова и отменой вызывающей стороны возможна гонка: отмена между выбором поколения и запуском переданной функции не должна оставлять бессрочное удержание поколения. Протокол запуска, допуска и освобождения должен быть подтверждён тестами, а не только проверкой сценария без ошибок.
+Call admission can race with cancellation by the caller: cancellation between generation selection and callback startup must not leave the generation retained indefinitely. The startup, admission, and release protocol must be validated by tests, not just by checking the happy path.
 
-**Ограничение языка:** в TypeScript нет линейных типов. Пользователь может сохранить объект сервиса во внешнюю переменную, вернуть его из переданной функции или запустить неучтённый Promise. Такой выход за границы управляемого времени жизни запрещён контрактом, но полностью предотвратить его средствами типов невозможно. Нельзя обещать безопасность памяти для произвольного пользовательского кода.
+**Language limitation:** TypeScript has no linear types. A user can save a service object in an external variable, return it from the callback, or start an untracked Promise. Such escape from the managed lifetime is prohibited by the contract, but cannot be fully prevented through types. Do not promise memory safety for arbitrary user code.
 
-Рабочие задачи Effect внутри поставщика сервиса должны быть привязаны к `Scope` и учтены. Нельзя использовать `forkDaemon`/`runFork` как скрытый способ обойти правила владения ресурсами. Ошибка произвольной дочерней задачи Effect сама по себе не означает автоматический отзыв сервиса: в версии 0.1 не следует придумывать универсальную политику контроля работоспособности и надзора за задачами. Реализация сервиса должна явно управлять своей работоспособностью.
+Worker Effect fibers inside a service provider must be attached to a `Scope` and tracked. Do not use `forkDaemon`/`runFork` as a hidden way to bypass resource ownership rules. Failure of an arbitrary child Effect fiber does not, by itself, imply automatic service revocation: version 0.1 should not invent a universal health-monitoring and fiber-supervision policy. A service implementation must manage its health explicitly.
 
-## 15. Ресурсы, MemoMap и границы совместимости с Layer
+## 15. Resources, MemoMap, and Layer Compatibility Boundaries
 
-### 15.1. Отдельный `Scope` для каждого поколения
+### 15.1. A Separate `Scope` for Each Generation
 
-`Scope` принадлежит поколению, а не только строковому идентификатору узла. После неудачного или устаревшего построения временный `Scope` не должен оставаться бесхозным. Сразу после `Scope.make` ответственность за его последующее закрытие должна быть закреплена способом, защищённым от отмены.
+A `Scope` belongs to a generation, not merely to a node's string identifier. After a failed or stale build, the temporary `Scope` must not be left without an owner. Immediately after `Scope.make`, responsibility for subsequently closing it must be assigned in a cancellation-safe manner.
 
-Финализаторы отвечают за пользовательские ресурсы, а контроллер — за порядок действий между компонентами. Одно не заменяет другое.
+Finalizers are responsible for user resources, while the controller is responsible for ordering actions across components. Neither replaces the other.
 
-### 15.2. MemoMap на поколение
+### 15.2. MemoMap per Generation
 
-В Effect есть публичные `Layer.makeMemoMap` и `Layer.buildWithMemoMap`. Они позволяют явно задать границу мемоизации. [S1]
+Effect provides public `Layer.makeMemoMap` and `Layer.buildWithMemoMap` APIs. They allow the memoization boundary to be specified explicitly. [S1]
 
-Решение для версии 0.1: **новый `MemoMap` для каждого нового поколения компонента**. В пределах одного построения сохраняется обычное совместное использование одинаковых вложенных `Layer`; между поколениями оно автоматически не переносится.
+The decision for version 0.1: **a new `MemoMap` for each new component generation**. Within a single build, normal sharing of identical nested `Layer`s is preserved; it is not automatically carried over between generations.
 
-Причина такого выбора: один и тот же объект `Layer` может сначала строиться с Database#1, а затем с Database#2. Неосторожная глобальная мемоизация может сохранить старую реализацию или старые входные зависимости. Нельзя считать `Layer.fresh` универсальным решением без проверки тестом.
+The reason for this choice: the same `Layer` object may first be built with Database#1 and then with Database#2. Careless global memoization may retain the old implementation or old input dependencies. Do not treat `Layer.fresh` as a universal solution without validating it with a test.
 
-Совместное использование ресурсов между компонентами обеспечивается через опубликованного поставщика сервиса и ссылки на его поколение. Нельзя подставлять исходный `Layer` поставщика сервиса в каждый зависимый сервис так, чтобы ресурсы БД создавались повторно.
+Resource sharing between components is provided through a published service provider and references to its generation. Do not inject the service provider's original `Layer` into every dependent service in a way that recreates DB resources.
 
-### 15.3. Поддерживаемое подмножество `Layer`
+### 15.3. Supported Subset of `Layer`
 
-Поддерживаются обычные `Layer`, создающие сервисы, создание ресурсов с привязкой к `Scope`, обычная внутренняя композиция `Layer` и выбор рецепта через Effect с известными оставшимися входными зависимостями.
+Supported features are ordinary service-producing `Layer`s, resource acquisition tied to a `Scope`, ordinary internal `Layer` composition, and recipe selection through Effect with known remaining input dependencies.
 
-Нельзя обещать, что построение `Layer` в отдельной задаче Effect и извлечение одного `Context` воспроизводят всё влияние `Layer.provide` на `FiberRefs`, средства журналирования и трассировки, поставщика конфигурации и флаги механизма выполнения вызывающего кода. Распространение этих настроек — отдельная семантика.
+Do not promise that building a `Layer` in a separate Effect fiber and extracting a single `Context` reproduces all the effects of `Layer.provide` on the calling code's `FiberRefs`, logging and tracing facilities, configuration provider, and runtime flags. Propagating these settings is a separate semantic concern.
 
-Для версии 0.1:
-
-```text
-зависимости от сервисов Context — поддерживаются;
-ресурсы поколения — поддерживаются;
-статическая среда построения DynamicRuntime — фиксируется и документируется;
-произвольные изменения FiberRef от поставщика → механизм выполнения зависимых сервисов — не гарантируются.
-```
-
-Сервисы в примерах захватывают свои зависимости при создании ресурсов. Если метод сервиса сам возвращает Effect с дополнительными требованиями, эти требования не исчезают из `runtime.use` автоматически.
-
-Ограничения совместимости должны быть описаны в README. Нельзя экспортировать универсальный «живой ManagedRuntime<R>», который якобы безопасно обновляет уже захваченные зависимости.
-
-## 16. Ошибки, повторные попытки и некооперативный код
-
-### 16.1. Ошибка создания ресурсов
-
-Нужно сохранять `Cause`, этап, поколение, отпечаток входов и время или порядковый номер попытки. Частично созданные ресурсы необходимо очищать. Ошибка одного компонента не должна завершать весь `DynamicRuntime`.
-
-По умолчанию **бесконечных автоматических повторных попыток нет**. После ошибки при том же отпечатке входов компонент остаётся в состоянии `Failed`. Новая попытка разрешается в следующих случаях:
+For version 0.1:
 
 ```text
-явным `retry(Service)`;
-реальным изменением соответствующего входного поколения;
-новым циклом активации условия запуска или включения;
-заменой описания через `replace`.
+Context service dependencies — supported;
+generation resources — supported;
+the static DynamicRuntime build environment — fixed and documented;
+arbitrary FiberRef changes from provider → dependent services' runtime — not guaranteed.
 ```
 
-Изменение независимой ветки графа не является основанием повторять неудачную попытку создания ресурсов.
+The services in the examples capture their dependencies during resource acquisition. If a service method itself returns an Effect with additional requirements, those requirements do not automatically disappear from `runtime.use`.
 
-Для `retry` в состояниях `Active`/`Pending`/`Disabled` нужно явно выбрать и документировать один из вариантов: операция ничего не делает либо возвращает типизированную ошибку. Выбранное поведение необходимо закрепить тестами. Предпочтительный вариант — отсутствие действия, без скрытого перезапуска работающего сервиса.
+Compatibility limitations must be documented in the README. Do not export a universal “live ManagedRuntime<R>” that supposedly updates already-captured dependencies safely.
 
-### 16.2. Дефект, прерывание и ошибка освобождения ресурсов
+## 16. Errors, Retries, and Non-Cooperative Code
 
-Нельзя терять различие между типизированной ошибкой, дефектом и прерыванием. Нельзя превращать все `Cause` в строки; строка — только диагностическое представление.
+### 16.1. Resource Acquisition Failure
 
-Прерывание устаревшей попытки — нормальный путь остановки, а не новый повод бесконечно перезапускать сервис.
+The `Cause`, stage, generation, input fingerprint, and attempt timestamp or sequence number must be retained. Partially acquired resources must be cleaned up. A failure in one component must not terminate the entire `DynamicRuntime`.
 
-Ошибка финализатора должна оставаться видимой как ошибка освобождения ресурсов. Нельзя писать `catchAllCause(() => Effect.void)` только для того, чтобы снимок состояния стал зелёным. После ошибки освобождения ресурсов узел не должен перезапускаться автоматически: состояние внешних ресурсов неизвестно. Для версии 0.1 допустимо потребовать пересоздания `DynamicRuntime` после такой ошибки.
-
-Остальные независимые операции очистки должны быть предприняты. Завершение работы с ошибками освобождения ресурсов нельзя выдавать за полностью успешное. Соблюдение порядка означает ожидание завершения зависимого сервиса и его попытки очистки, но не доказывает успешное освобождение неисправного внешнего ресурса.
-
-### 16.3. Непрерываемые операции и операции вне управления Effect
-
-Произвольный некооперативный код невозможно безопасно «убить» средствами этой библиотеки. Если построение, переданная функция или финализатор не завершаются, соответствующая ветка может остаться в состоянии `Stopping`, а завершение работы `DynamicRuntime` — продолжать ожидание.
-
-Тайм-аут может ограничить ожидание пользователя или предоставить диагностику, но сам по себе не разрешает закрыть поставщика сервиса, пока зависимый сервис всё ещё работает, и не делает небезопасный код безопасным.
-
-У `Effect.acquireRelease` есть особенности прерываемости создания и освобождения ресурсов; их нужно проверить в установленной версии. Не следует писать тест «acquireRelease(Effect.never) обязан мгновенно отмениться» без понимания API. Для детерминированного теста прерывания нужно использовать явно прерываемый участок с `Deferred`. [S7]
-
-Переданные функции жизненного цикла не должны ждать, пока обслуживаемый ими компонент сам достигнет `Active`/состояния покоя, или инициировать циклические управляющие операции. Повторный вход в изменение графа из операций создания или освобождения ресурсов не поддерживается в версии 0.1; это ограничение должно быть документировано.
-
-## 17. Диагностика и обязательные инварианты
-
-Для ошибок отдельных узлов гетерогенный снимок состояния может хранить `Cause<unknown>`: тип `E` сохраняется в описании и реализации конкретного компонента, но общий `DynamicRuntime` не должен обещать статически известное объединение типов ошибок всех будущих регистраций. Ошибки построения не добавляются задним числом в тип уже завершившегося `register`; они наблюдаются через состояние и операции ожидания.
-
-Снимок состояния содержит как минимум:
+By default, **there are no unbounded automatic retries**. After a failure with the same input fingerprint, the component remains in `Failed`. A new attempt is allowed in the following cases:
 
 ```text
-состояние DynamicRuntime: Running / Closing / Closed / CloseFailed
-монотонная версия снимка состояния
-для узла: id, ключ публикуемого сервиса, requires, desiredEnabled, состояние жизненного цикла
-идентификатор поколения, версия рецепта, идентификаторы поколений выбранных зависимостей
-причины ожидания
-последняя ошибка и этап
-число живых поколений/попыток и управляемых вызовов
+an explicit `retry(Service)`;
+an actual change in the relevant input generation;
+a new activation cycle of the startup condition or enablement;
+replacement of the description via `replace`.
 ```
 
-Нельзя публиковать сами объекты сервисов, секреты конфигурации или содержимое бизнес-запросов. Ошибки могут содержать чувствительные данные: нужно предусмотреть документированный формат безопасного краткого представления и не сериализовать произвольные объекты бесконтрольно.
+A change in an independent branch of the graph is not grounds for retrying a failed resource acquisition attempt.
 
-`changes` предназначен для состояния, а не для аудиторского журнала событий. Допустима доставка снимков состояния с ограниченным буфером или объединением промежуточных обновлений и монотонной версией; получатель должен иметь возможность получить текущий снимок состояния. Критичные внутренние события жизненного цикла таким способом терять нельзя.
+For `retry` in the `Active`/`Pending`/`Disabled` states, one of two behaviors must be explicitly chosen and documented: the operation does nothing, or it returns a typed error. The chosen behavior must be covered by tests. The preferred option is a no-op, with no implicit restart of a running service.
 
-**Инварианты, которые должны быть сформулированы в тестах:**
+### 16.2. Defects, Interruption, and Resource Release Failures
 
-| ID | Инвариант |
+The distinction between a typed error, a defect, and an interruption must not be lost. Do not convert all `Cause` values to strings; a string is only a diagnostic representation.
+
+Interrupting a stale attempt is a normal shutdown path, not a new reason to restart the service indefinitely.
+
+A finalizer failure must remain visible as a resource release failure. Do not write `catchAllCause(() => Effect.void)` merely to make the state snapshot look healthy. After a resource release failure, the node must not restart automatically: the state of external resources is unknown. For version 0.1, it is acceptable to require recreating `DynamicRuntime` after such a failure.
+
+Other independent cleanup operations must still be attempted. Shutdown with resource release failures must not be presented as fully successful. Respecting the ordering means waiting for the dependent service to terminate and for its cleanup attempt to finish, but does not prove that a faulty external resource was successfully released.
+
+### 16.3. Uninterruptible Operations and Operations Outside Effect's Control
+
+Arbitrary non-cooperative code cannot be safely “killed” by this library. If construction, a supplied function, or a finalizer does not terminate, the corresponding branch may remain in `Stopping`, and `DynamicRuntime` shutdown may continue waiting.
+
+A timeout may limit how long the user waits or provide diagnostics, but it does not, by itself, permit closing a service provider while a dependent service is still running, nor does it make unsafe code safe.
+
+`Effect.acquireRelease` has specific acquisition and release interruptibility semantics; these must be checked in the installed version. Do not write a test asserting that “acquireRelease(Effect.never) must be cancelled instantly” without understanding the API. A deterministic interruption test must use an explicitly interruptible region with `Deferred`. [S7]
+
+Supplied lifecycle functions must not wait for the component they serve to reach `Active`/an idle state itself, or initiate cyclic control operations. Reentrant graph mutation from resource acquisition or release operations is not supported in version 0.1; this limitation must be documented.
+
+## 17. Diagnostics and Required Invariants
+
+For errors in individual nodes, the heterogeneous state snapshot may store `Cause<unknown>`: the type `E` is preserved in the description and implementation of the specific component, but the overall `DynamicRuntime` must not promise a statically known union of the error types of all future registrations. Construction errors are not retroactively added to the type of an already completed `register`; they are observed through state and wait operations.
+
+The state snapshot contains at least:
+
+```text
+DynamicRuntime state: Running / Closing / Closed / CloseFailed
+monotonic state snapshot version
+for a node: id, published service key, requires, desiredEnabled, lifecycle state
+generation identifier, recipe version, generation identifiers of the selected dependencies
+reasons for waiting
+last error and stage
+number of live generations/attempts and managed calls
+```
+
+Do not expose the service objects themselves, configuration secrets, or business request contents. Errors may contain sensitive data: provide a documented safe summary format, and do not serialize arbitrary objects without controls.
+
+`changes` is intended for state, not for an audit event log. State snapshots may be delivered using a bounded buffer or by coalescing intermediate updates, with a monotonic version; the consumer must be able to obtain the current state snapshot. Critical internal lifecycle events must not be lost in this way.
+
+**Invariants that must be expressed in tests:**
+
+| ID | Invariant |
 |---|---|
-| I1 | Публикация в состоянии `Active` принадлежит только неотозванному поколению, которое завершило создание ресурсов. |
-| I2 | Опубликованный зависимый сервис ссылается на те же всё ещё опубликованные поколения зависимостей, которые были выбраны при его запуске. |
-| I3 | При признании поколений недействительными публикации всего затронутого транзитивного замыкания отзываются до допуска новых вызовов. |
-| I4 | Поставщик сервиса не закрывается, пока его используют учитываемые зависимые сервисы, операции построения или вызовы. |
-| I5 | Устаревший результат завершения не публикуется после замены описания, отключения, цикла изменения условия запуска или удаления регистрации. |
-| I6 | У одного узла нет двух одновременно работающих поколений; у ключа сервиса не более одной публикации. |
-| I7 | Каждому созданному Scope соответствуют известный владелец и путь очистки. |
-| I8 | Конкретный зарегистрированный финализатор вызывается ровно один раз в обычных тестовых сценариях. Это не обещание успешного освобождения любых внешних ресурсов. |
-| I9 | Незатронутые поколения сохраняют идентичность и не повторяют создание ресурсов. |
-| I10 | Неудачная регистрация или замена оставляет желаемый граф и текущие публикации неизменными. |
-| I11 | При успешном завершении работы `DynamicRuntime` нет живых учтённых `Scope`, вызовов, наблюдателей за условиями запуска и рабочих задач жизненного цикла. |
-| I12 | Ошибки и незавершённая очистка не скрываются под Active/Closed. |
+| I1 | A publication in the `Active` state belongs only to an unrevoked generation that has completed resource acquisition. |
+| I2 | A published dependent service refers to the same still-published dependency generations that were selected when it started. |
+| I3 | When generations are invalidated, publications for the entire affected transitive closure are revoked before new calls are admitted. |
+| I4 | A service provider is not closed while tracked dependent services, construction operations, or calls are using it. |
+| I5 | A stale completion result is not published after description replacement, disabling, a startup-condition change cycle, or registration removal. |
+| I6 | A node does not have two simultaneously running generations; a service key has at most one publication. |
+| I7 | Every created Scope has a known owner and cleanup path. |
+| I8 | A specific registered finalizer is invoked exactly once in normal test scenarios. This is not a promise that all external resources will be successfully released. |
+| I9 | Unaffected generations retain their identity and do not repeat resource acquisition. |
+| I10 | A failed registration or replacement leaves the desired graph and current publications unchanged. |
+| I11 | After successful `DynamicRuntime` shutdown, there are no live tracked `Scope` instances, calls, startup-condition observers, or lifecycle workers. |
+| I12 | Errors and unfinished cleanup are not hidden behind Active/Closed. |
 
-Нельзя трактовать I2 как запрет на существование выводимого из работы зависимого сервиса, чей поставщик уже отозван: старые объекты могут временно оставаться физически живыми для безопасной очистки. I2 относится к **опубликованному** графу.
+I2 must not be interpreted as prohibiting the existence of a retiring dependent service whose provider's publication has already been revoked: old objects may temporarily remain physically alive for safe cleanup. I2 applies to the **published** graph.
 
-## 18. Приёмочные тесты
+## 18. Acceptance Tests
 
-Все конкурентные сценарии должны строиться на `Deferred`, управляемых задачах Effect и проверке порядка событий. Нельзя использовать случайные задержки как средство синхронизации. `TestClock` предназначен для управления временем, а не для замены барьеров, задающих причинно-следственный порядок.
+All concurrent scenarios must be built around `Deferred`, managed Effect fibers, and event-order assertions. Random delays must not be used for synchronization. `TestClock` is intended to control time, not to replace barriers that establish causal ordering.
 
-| ID | Сценарий и ожидаемый результат |
+| ID | Scenario and Expected Result |
 |---|---|
-| T01 | Нет зависимостей: регистрация → Active; завершение работы `DynamicRuntime` вызывает освобождение ресурсов ровно один раз. |
-| T02 | Зависимый сервис зарегистрирован раньше поставщика сервиса: состояние `Pending`, создание ресурсов не выполняется. |
-| T03 | Поставщик сервиса появился: цепочка запускается в топологическом порядке. |
-| T04 | Отключение корня цепочки: публикации отозваны, ресурсы освобождаются в порядке ViewModel → Analytics → Database. |
-| T05 | Повторное включение создаёт новые идентификаторы поколений; используются новые ссылки. |
-| T06 | Замена поставщика сервиса пересобирает транзитивно зависимые сервисы, независимая ветка не меняется. |
-| T07 | Ромбовидный граф: ресурсы общего поставщика сервиса создаются один раз и закрываются после обоих зависимых сервисов. |
-| T08 | Частично успешное создание ресурсов завершается ошибкой: все зарегистрированные операции очистки выполнены, публикации нет. |
-| T09 | Типизированная ошибка и дефект при создании ресурсов отражаются как разные Cause, `DynamicRuntime` остаётся работоспособным. |
-| T10 | Состояние Failed не приводит к циклу повторных попыток из-за снимка состояния, повторного значения условия запуска или изменения независимого узла. |
-| T11 | Явный `retry` создаёт одну новую попытку; смена необходимого поставщика сервиса разрешает новую попытку. |
-| T12 | Условие запуска равно false при регистрации: состояние `Pending`, построение не начато. Значение true запускает узел. |
-| T13 | Переход true → true не вызывает перезапуск; переход false → true после остановки создаёт новое поколение. |
-| T14 | Подписка на условие запуска переживает остановку поколения и отключение, но удаляется при удалении регистрации или завершении работы `DynamicRuntime`. |
-| T15 | Проверка потери уведомления: изменение условия запуска во время подключения наблюдателя не теряется. |
-| T16 | Построение удерживается с помощью Deferred; отключение приходит до его окончания: старое поколение никогда не публикуется. |
-| T17 | Построение удерживается; обязательный поставщик сервиса заменён: результат построения со старой входной зависимостью отклоняется, его ресурсы очищаются. |
-| T18 | Условие запуска меняется true → false → true при удерживаемом построении: старую попытку нельзя принять только на основании последнего true. |
-| T19 | Быстрые замены, отключения и включения обрабатываются согласованно; публикация соответствует последнему допустимому поколению. |
-| T20 | Контроллер обрабатывает отключение и запрос снимка состояния, пока другой узел выполняет длительное создание ресурсов. |
-| T21 | Финализатор зависимого сервиса обращается к поставщику сервиса: поставщик остаётся жив до завершения финализатора. |
-| T22 | Дубликат идентификатора или ключа экспорта, цикл из узла в себя, обычный цикл, цикл после появления отсутствующего поставщика сервиса — явная ошибка без частичного изменения графа. |
-| T23 | Во время вывода узла из работы повторная регистрация его идентификатора или ключа получает NodeRetiring; после очистки регистрация разрешена. Запоздавшее завершение старой регистрации не затрагивает новую. |
-| T24 | Повторные включение, отключение и завершение работы `DynamicRuntime` не создают лишних операций создания и освобождения ресурсов. |
-| T25 | Один и тот же объект `Layer` с новым Context зависимостей строится заново и не использует старый MemoMap. |
-| T26 | Внутри одного `Layer` повторно использованный вложенный `Layer` сохраняет обычную семантику совместного использования. |
-| T27 | `use` для отсутствующего или отозванного сервиса завершается с ошибкой `ServiceUnavailable` и не запускает переданную функцию. |
-| T28 | `use`, выполняемый конкурентно с заменой, либо отклоняется, либо привязывается к одному поколению; использования после освобождения ресурсов нет. |
-| T29 | Отмена вызывающей стороны во время допуска или выполнения `use` освобождает записи учёта и дочерние задачи, привязанные к `Scope` вызова. |
-| T30 | Отзыв прерывает существующий управляемый вызов и ждёт его очистки; переданная бизнес-функция автоматически не повторяется. |
-| T31 | `use` сохраняет `Context`/`FiberRefs` вызывающей стороны; дополнительное требование не исчезает из типа. |
-| T32 | Дочерняя задача Effect сервиса, привязанная к Scope, живёт после создания ресурсов и останавливается при остановке поколения. |
-| T33 | Завершение работы `DynamicRuntime` в состояниях `Starting`/`Stopping` и при нескольких заменах корректно завершает все обычные кооперативные операции. |
-| T34 | Дефект при освобождении ресурсов виден; нет ложного успешного Closed или автоматического перезапуска. |
-| T35 | Контролируемая непрерываемая операция удерживается с помощью Deferred: ветка остаётся в состоянии `Stopping`; после ручного снятия блокировки корректно завершается. Тест не зависает навсегда. |
-| T36 | Два экземпляра `DynamicRuntime` с одинаковыми Tags и идентификаторами не влияют друг на друга. |
-| T37 | Отсутствующее внешнее требование, неверная форма `acquire`, неверный выходной тег — отрицательные тесты типов. |
-| T38 | `Layer` с уже обеспеченными внутренними зависимостями принимается; обычный пользовательский API не требует приведений типов. |
-| T39 | Не менее 100 циклов `register`/`replace`/`disable`/`enable`/`unregister`/`shutdown` на тестовом ресурсе: баланс создания и освобождения ресурсов, отсутствие утечек учитываемых ресурсов. |
-| T40 | `awaitState`/`awaitIdle` корректно отменяются, не зависают после удаления регистрации или завершения работы `DynamicRuntime` и сами по себе не считают `Pending` ошибкой. |
+| T01 | No dependencies: registration → Active; `DynamicRuntime` shutdown triggers resource release exactly once. |
+| T02 | A dependent service is registered before its provider: the state is `Pending`, and resource acquisition is not performed. |
+| T03 | A service provider becomes available: the chain starts in topological order. |
+| T04 | Disabling the root of a chain: publications are revoked, and resources are released in the order ViewModel → Analytics → Database. |
+| T05 | Re-enabling creates new generation identifiers; new references are used. |
+| T06 | Replacing a service provider rebuilds transitively dependent services; an independent branch remains unchanged. |
+| T07 | Diamond graph: the shared service provider's resources are acquired once and closed after both dependent services. |
+| T08 | Partially successful resource acquisition fails: all registered cleanup operations are executed, and there is no publication. |
+| T09 | A typed error and a defect during resource acquisition are reflected as distinct Cause values; `DynamicRuntime` remains operational. |
+| T10 | The Failed state does not lead to a retry loop because of a state snapshot, a repeated startup-condition value, or a change to an independent node. |
+| T11 | An explicit `retry` creates one new attempt; changing a required service provider permits a new attempt. |
+| T12 | The startup condition is false at registration: the state is `Pending`, and construction has not started. A true value starts the node. |
+| T13 | A true → true transition does not trigger a restart; a false → true transition after stopping creates a new generation. |
+| T14 | The startup-condition subscription survives generation shutdown and disabling, but is removed when the registration is removed or `DynamicRuntime` shuts down. |
+| T15 | Lost-notification check: a startup-condition change during observer attachment is not lost. |
+| T16 | Construction is held using Deferred; disabling arrives before it finishes: the old generation is never published. |
+| T17 | Construction is held; a required service provider is replaced: the construction result using the old input dependency is rejected, and its resources are cleaned up. |
+| T18 | The startup condition changes true → false → true while construction is held: the old attempt must not be accepted solely on the basis of the latest true value. |
+| T19 | Rapid replacements, disabling, and enabling are handled consistently; the publication corresponds to the latest valid generation. |
+| T20 | The controller handles disabling and a state snapshot request while another node performs lengthy resource acquisition. |
+| T21 | A dependent service's finalizer accesses the service provider: the provider remains alive until the finalizer completes. |
+| T22 | A duplicate identifier or export key, a self-cycle, an ordinary cycle, or a cycle created when a missing service provider appears produces an explicit error with no partial graph mutation. |
+| T23 | While a node is retiring, re-registering its identifier or key receives NodeRetiring; registration is allowed after cleanup. A late completion from the old registration does not affect the new one. |
+| T24 | Repeated enabling, disabling, and `DynamicRuntime` shutdown do not create extra resource acquisition or release operations. |
+| T25 | The same `Layer` object is built again with a new dependency Context and does not use the old MemoMap. |
+| T26 | Within a single `Layer`, a reused nested `Layer` retains normal sharing semantics. |
+| T27 | `use` for a missing service or one whose publication has been revoked fails with `ServiceUnavailable` and does not run the supplied function. |
+| T28 | `use` concurrent with replacement is either rejected or bound to one generation; there is no use after resource release. |
+| T29 | Caller cancellation during admission or execution of `use` releases tracking entries and child fibers tied to the call's `Scope`. |
+| T30 | Revocation interrupts an existing managed call and waits for its cleanup; the supplied business function is not retried automatically. |
+| T31 | `use` preserves the caller's `Context`/`FiberRefs`; an additional requirement does not disappear from the type. |
+| T32 | A service's child Effect fiber tied to a Scope remains alive after resource acquisition and stops when the generation stops. |
+| T33 | `DynamicRuntime` shutdown in `Starting`/`Stopping` states and during multiple replacements correctly terminates all normal cooperative operations. |
+| T34 | A defect during resource release is visible; there is no falsely successful Closed state or automatic restart. |
+| T35 | A controlled uninterruptible operation is held using Deferred: the branch remains in `Stopping`; after being manually unblocked, it terminates correctly. The test does not hang forever. |
+| T36 | Two `DynamicRuntime` instances with identical Tags and identifiers do not affect one another. |
+| T37 | A missing external requirement, an incorrect `acquire` shape, and an incorrect output tag are negative type tests. |
+| T38 | A `Layer` whose internal dependencies have already been provided is accepted; the normal user-facing API does not require type assertions. |
+| T39 | At least 100 cycles of `register`/`replace`/`disable`/`enable`/`unregister`/`shutdown` on a test resource: balanced resource acquisition and release, with no leaks of tracked resources. |
+| T40 | `awaitState`/`awaitIdle` cancel correctly, do not hang after registration removal or `DynamicRuntime` shutdown, and do not, by themselves, treat `Pending` as an error. |
 
-Дополнительно желательно тестирование на основе свойств или модели для чистого планировщика: на небольших случайных направленных ациклических графах (DAG) и последовательностях команд с фиксированным начальным значением генератора случайных чисел. Оно не должно подменять детерминированные тесты конкурентного выполнения.
+Property-based or model-based testing of the pure planner is also desirable: use small random directed acyclic graphs (DAGs) and command sequences with a fixed random seed. This must not replace deterministic concurrency tests.
 
-Тесты типов должны действительно выполняться через TypeScript или подходящий инструмент запуска тестов. `@ts-expect-error` без включения файла в проверку типов не является тестом.
+Type tests must actually run through TypeScript or a suitable test runner. `@ts-expect-error` in a file that is not included in type checking is not a test.
 
-## 19. План реализации
+## 19. Implementation Plan
 
-### Этап 0 — проверка примитивов и API
+### Stage 0 — Verify Primitives and API
 
-Зафиксировать версии, выполнить практическую проверку совместимости и написать минимальные положительные и отрицательные тесты типов. В ADR описать границу между нашей семантикой и встроенными `Reloadable`/`LayerMap`. Не затягивать исследование: после подтверждения на исполняемом примере переходить к реализации.
+Pin versions, perform a hands-on compatibility check, and write minimal positive and negative type tests. Describe the boundary between our semantics and the built-in `Reloadable`/`LayerMap` in an ADR. Do not prolong the investigation: once confirmed with an executable example, move on to implementation.
 
-### Этап 1 — модель и чистый планировщик
+### Stage 1 — Model and Pure Planner
 
-Реализовать абстрактное синтаксическое дерево требований, непрозрачное описание `DynamicLayer`, идентичность узлов и поколений, проверку графа-кандидата, топологический порядок и транзитивное замыкание затронутых узлов. На этом этапе не создавать собственную систему управления ресурсами.
+Implement the requirements abstract syntax tree, the opaque `DynamicLayer` description, node and generation identity, candidate-graph validation, topological ordering, and the transitive closure of affected nodes. Do not create a custom resource management system at this stage.
 
-### Этап 2 — создание ресурсов и упорядоченное завершение
+### Stage 2 — Resource Acquisition and Ordered Shutdown
 
-Реализовать один контроллер, управляемые рабочие задачи, новые `Scope`/`MemoMap` и публикацию только через контроллер, а также операции `register`/`enable`/`disable`/`shutdown`. Обеспечить работу основной цепочки и ромбовидного графа зависимостей, включая случаи неудачного создания ресурсов.
+Implement a single controller, managed workers, fresh `Scope`/`MemoMap` instances, and publication exclusively through the controller, along with the `register`/`enable`/`disable`/`shutdown` operations. Make the main chain and diamond dependency graph work, including resource acquisition failures.
 
-### Этап 3 — изменение графа и конкурентные сценарии
+### Stage 3 — Graph Mutation and Concurrent Scenarios
 
-Реализовать `replace`/`unregister`, токены поколений, оптимистическую проверку перед публикацией, обработку гонок в состояниях `Starting`/`Stopping` и ошибок освобождения ресурсов. Без тестов этих сценариев нельзя переходить к заявлению «горячая замена работает».
+Implement `replace`/`unregister`, generation tokens, optimistic validation before publication, handling of races in `Starting`/`Stopping`, and resource release failures. Do not proceed to claiming that “hot replacement works” without tests for these scenarios.
 
-### Этап 4 — условие запуска и управляемое использование
+### Stage 4 — Startup Condition and Managed Use
 
-Реализовать условие запуска на основе `SubscriptionRef` с правильным временем жизни; допуск, отзыв допуска и отмену переданной функции; сохранение контекста вызывающей стороны. Если API приходится уточнить, одновременно обновить примеры, тесты типов и ADR.
+Implement a startup condition based on `SubscriptionRef` with the correct lifetime; admission, admission revocation, and cancellation of the supplied function; and preservation of the caller's context. If the API needs refinement, update the examples, type tests, and ADR at the same time.
 
-### Этап 5 — пакет, документация, полный прогон
+### Stage 5 — Package, Documentation, and Full Test Run
 
-Подготовить публичные экспорты, файлы деклараций типов, проверку использования собранного пакета внешним проектом, примеры, README, описание ограничений и контрольный список выпуска. Версия остаётся экспериментальной.
+Prepare public exports, type declaration files, a check that an external project can consume the built package, examples, a README, a description of limitations, and a release checklist. The version remains experimental.
 
-На каждом этапе обновлять `docs/status.md`: указывать, что выполнено, какие команды запускались, каковы результаты и ограничения. Не помечать непроверенные пункты как завершённые. Если среда блокирует установку или тестирование, оставить воспроизводимые команды и честный статус, а не фиктивный отчёт об успешных проверках.
+Update `docs/status.md` at every stage: state what has been completed, which commands were run, and the results and limitations. Do not mark unverified items as complete. If the environment blocks installation or testing, leave reproducible commands and an honest status rather than a fabricated report of successful checks.
 
-## 20. Структура репозитория и инструменты
+## 20. Repository Structure and Tooling
 
-Предпочтителен один пакет, без инфраструктуры монорепозитория:
+A single package is preferred, without monorepo infrastructure:
 
 ```text
 src/
@@ -829,11 +831,11 @@ tsconfig.json
 pnpm-lock.yaml
 ```
 
-Это ориентир, а не требование сохранять пустые файлы. Не создавать отдельный модуль для каждой функции. Примеры из конкретных предметных областей с реальными соединениями не нужны.
+This is a guide, not a requirement to retain empty files. Do not create a separate module for every function. Domain-specific examples with real connections are not needed.
 
-Во время работы библиотека использует пакет `effect`, который предоставляет приложение через `peerDependencies`; для разработки проверенная версия отдельно фиксируется в `devDependencies`. Дополнительные библиотеки времени выполнения допустимы только с конкретным обоснованием. Исходный набор инструментов разработки: pnpm, TypeScript, Vitest с совместимым `@effect/vitest`; проверка стиля и форматирование — по существующим соглашениям проекта. Не добавлять отдельные библиотеки машин состояний, диспетчеров событий или внедрения зависимостей для замены уже имеющихся средств Effect.
+At runtime, the library uses the `effect` package, supplied by the consuming application through `peerDependencies`; for development, the verified version is pinned separately in `devDependencies`. Additional runtime libraries are allowed only with specific justification. The initial development toolset is pnpm, TypeScript, and Vitest with a compatible `@effect/vitest`; linting and formatting follow the project's existing conventions. Do not add separate state-machine, event-dispatcher, or dependency-injection libraries to replace capabilities already available in Effect.
 
-Обязательные команды проекта в исходном плане:
+Required project commands in the original plan:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -846,39 +848,39 @@ pnpm test:package
 pnpm example:basic
 ```
 
-`test:package` проверяет импорт **собранного** пакета из отдельного тестового проекта-потребителя на TypeScript и отсутствие случайных импортов внутренних модулей или исходников. Примеры должны проходить проверку типов. Не выбирать сборщик, который встраивает Effect внутрь пакета.
+`test:package` verifies imports of the **built** package from a separate TypeScript test consumer project and the absence of accidental imports of internal modules or source files. Examples must pass type checking. Do not choose a bundler that embeds Effect in the package.
 
-В ядре не должно быть обязательных Node/Bun API. Основная среда CI — поддерживаемый Node LTS; версии фиксируются в проекте. Желательна базовая проверка работоспособности в Bun; не заявлять о её прохождении, если Bun в среде нет. Не заявлять совместимость с браузером без отдельной базовой проверки работоспособности.
+The core must not require Node/Bun APIs. The primary CI environment is a supported Node LTS release; versions are pinned in the project. A basic smoke test in Bun is desirable; do not claim it has passed if Bun is not available in the environment. Do not claim browser compatibility without a separate basic smoke test.
 
-Позднее одобренный фактический выбор Effect `4.0.0-rc.115` и Bun, указанный в разделе 21, имеет приоритет над исходным набором Effect v3/pnpm/Vitest.
+The actual, later-approved choice of Effect `4.0.0-rc.115` and Bun, specified in section 21, takes precedence over the original Effect v3/pnpm/Vitest toolset.
 
-## 21. Критерии завершения
+## 21. Completion Criteria
 
-Выпуск 0.1 завершён, когда одновременно выполнены все перечисленные условия:
+Release 0.1 is complete when all of the following conditions are met simultaneously:
 
-**Приёмка завершена:** результаты проверок и матрица T01–T40 — в [docs/status.md](docs/status.md). По явному решению владельца использованы Effect `4.0.0-rc.115` и Bun вместо исходного требования Effect v3 и набора инструментов pnpm/Vitest. Этот позднее одобренный фактический выбор имеет приоритет над исходным требованием; уточнения семантики зафиксированы в ADR.
+**Acceptance is complete:** verification results and the T01–T40 matrix are in [docs/status.md](docs/status.md). By the owner's explicit decision, Effect `4.0.0-rc.115` and Bun were used instead of the original requirement for Effect v3 and the pnpm/Vitest toolchain. This subsequently approved actual choice takes precedence over the original requirement; semantic clarifications are recorded in the ADR.
 
-- [x] Зафиксирована и реально проверена одна основная версионная линейка Effect, нет смешения API v3/v4.
-- [x] Оба конструктора `fromLayer`/`fromEffect` используют одну реализацию жизненного цикла.
-- [x] `register`/`enable`/`disable`/`replace`/`unregister`/`retry` реализованы, а не заменены заглушками.
-- [x] Логическое условие запуска действительно реактивно и не теряет наблюдение после остановки сервиса.
-- [x] Все обязательные приёмочные тесты проходят; нет пропущенных тестов, маскирующих нереализованные гарантии.
-- [x] Есть отдельные тесты, доказывающие защиту от устаревшей публикации, обратный порядок завершения и отмену при использовании сервиса и допуске к нему.
-- [x] Обычный API не требует от пользователя `any` или приведений типов; отрицательные тесты типов выполняются.
-- [x] Независимые ветви не пересоздаются, старые мемоизированные сервисы не возвращаются.
-- [x] При успешном кооперативном завершении число созданных и освобождённых ресурсов совпадает; отслеживаемых задач Effect, `Scope` и вызовов не остаётся.
-- [x] Ошибки освобождения ресурсов и некооперативное завершение не скрыты и не объявлены успешными.
-- [x] Работают экспорты, декларации типов и использование собранного пакета внешним проектом.
-- [x] README объясняет гарантии, ограничения, прерывание внешних операций и запрет на выход сервиса за пределы управляемого использования.
-- [x] Есть рабочие примеры `basic`/`effect-factory`/`failure` без реальной инфраструктуры.
-- [x] Нет HMR, сети, БД, UI, произвольного загрузчика плагинов или других незапрошенных подсистем.
-- [x] Финальный отчёт различает «реализовано», «проверено» и «не проверено».
+- [x] One primary Effect version line has been pinned and actually verified, with no mixing of v3/v4 APIs.
+- [x] Both constructors, `fromLayer`/`fromEffect`, use the same lifecycle implementation.
+- [x] `register`/`enable`/`disable`/`replace`/`unregister`/`retry` are implemented, not replaced with stubs.
+- [x] The Boolean startup condition is genuinely reactive and continues to be observed after the service stops.
+- [x] All mandatory acceptance tests pass; no skipped tests conceal unimplemented guarantees.
+- [x] Dedicated tests demonstrate protection against stale publication, reverse-order shutdown, and cancellation during service use and admission to service use.
+- [x] The normal API does not require users to use `any` or type assertions; negative type tests are run.
+- [x] Independent branches are not recreated, and old memoized services are not returned.
+- [x] Upon successful cooperative shutdown, the number of acquired resources matches the number released; no tracked Effect fibers, `Scope` instances, or calls remain.
+- [x] Resource release errors and non-cooperative shutdown are neither hidden nor reported as successful.
+- [x] Exports, type declarations, and consumption of the built package by an external project work.
+- [x] The README explains guarantees, limitations, interruption of external operations, and the prohibition on services escaping managed use.
+- [x] Working `basic`/`effect-factory`/`failure` examples are available without real infrastructure.
+- [x] There is no HMR, networking, database, UI, arbitrary plugin loader, or other unrequested subsystem.
+- [x] The final report distinguishes between “implemented,” “verified,” and “not verified.”
 
-Число строк кода не является критерием. Не жертвовать владением ресурсами и тестами гонок ради обещания «ядро на 300 строк».
+Line count is not a criterion. Do not sacrifice resource ownership and race-condition tests for a promise of “a 300-line core.”
 
-## 22. Возможное продолжение после 0.1 — не реализовывать сейчас
+## 22. Possible Work After 0.1 — Do Not Implement Now
 
-Следующий осмысленный шаг — более выразительная **отслеживаемая алгебра требований**, а не произвольный `when: Effect<boolean>`:
+The next meaningful step is a more expressive **tracked requirement algebra**, not an arbitrary `when: Effect<boolean>`:
 
 ```text
 service(tag)
@@ -888,88 +890,88 @@ map(requirement, pureFunction)
 choose(observableSelector, declaredBranches)
 ```
 
-Для `optional` нужно заранее определить, пересоздаётся ли зависимый сервис при появлении необязательной зависимости. Для `choose` — как фиксируются прочитанные зависимости, когда меняются подписки, как предотвращаются потерянные пробуждения и циклы и как старые поколения признаются недействительными.
+For `optional`, define in advance whether the dependent service is recreated when an optional dependency becomes available. For `choose`, define how read dependencies are recorded, when subscriptions change, how lost wakeups and cycles are prevented, and how old generations are invalidated.
 
-`Requirement.gen` возможен только с контролируемыми примитивами, передаваемыми через `yield`, и явным отслеживанием зависимостей. Обычный `Effect.gen` нельзя объявить автоматически реактивным: внутри он может читать произвольное внешнее состояние.
+`Requirement.gen` is possible only with controlled primitives passed through `yield` and explicit dependency tracking. Ordinary `Effect.gen` cannot be declared automatically reactive: it may read arbitrary external state internally.
 
-Другие направления: ограниченные политики повторных попыток и задержек между ними, экспорт нескольких сервисов, несколько поставщиков сервиса с явной политикой выбора, адаптеры наблюдаемых настроек и состояния работоспособности, API для просмотра внутреннего состояния. В исходном плане сюда также относился перенос на Effect v4; позднее одобренный выбор Effect `4.0.0-rc.115` имеет приоритет над этим исходным планом. Каждое направление требует собственной семантики, а не новой строки в списке возможностей.
+Other directions include bounded retry and backoff policies, exporting multiple services, multiple service providers with an explicit selection policy, adapters for observable configuration and health status, and an API for inspecting internal state. The original plan also included migration to Effect v4 here; the subsequently approved choice of Effect `4.0.0-rc.115` takes precedence over that original plan. Each direction requires its own semantics, not just another entry in a feature list.
 
-## 23. Первичные источники для проверки
+## 23. Primary Sources for Verification
 
-Источники проверялись при подготовке материалов для передачи проекта. Ссылки на ветки изменяемые: при практической проверке совместимости нужно сохранить фактически установленную версию и, при необходимости, коммит или тег. Наличие функции в ветке не подтверждает её наличие в любой опубликованной версии.
+These sources were checked while preparing the project handoff materials. Branch links are mutable: when verifying compatibility in practice, record the version actually installed and, if necessary, the commit or tag. The presence of a function on a branch does not confirm its presence in every published version.
 
-[S1] Effect v3 Layer: динамические конструкторы, сборка в рамках `Scope`, `MemoMap`.
+[S1] Effect v3 Layer: dynamic constructors, building within a `Scope`, `MemoMap`.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/Layer.ts
 ```
 
-[S2] Effect v3 Reloadable: перезагружаемый сервис, операции `manual`/`auto`/`reload`/`get`.
+[S2] Effect v3 Reloadable: a reloadable service, `manual`/`auto`/`reload`/`get` operations.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/Reloadable.ts
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/internal/reloadable.ts
 ```
 
-[S3] Effect v3 ScopedRef: ссылка, управляющая ресурсами, и смена принадлежащего ей значения.
+[S3] Effect v3 ScopedRef: a resource-managing reference and replacement of the value it owns.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/ScopedRef.ts
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/internal/scopedRef.ts
 ```
 
-[S4] Effect v3 LayerMap: динамические ресурсы по ключам и признание их недействительными; в исследованном исходнике помечен как экспериментальный.
+[S4] Effect v3 LayerMap: dynamic keyed resources and their invalidation; marked as experimental in the source examined.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/LayerMap.ts
 ```
 
-[S5] Effect v3 SubscriptionRef: текущее значение вместе с изменениями.
+[S5] Effect v3 SubscriptionRef: the current value together with its changes.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/SubscriptionRef.ts
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/internal/subscriptionRef.ts
 ```
 
-[S6] Effect v3 Scope: владение ресурсами и закрытие `Scope` с выполнением финализаторов.
+[S6] Effect v3 Scope: resource ownership and closing a `Scope` with finalizer execution.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/Scope.ts
 ```
 
-[S7] Effect v3 Effect: acquireRelease, прерывание и задачи Effect, привязанные к `Scope`. Проверить точные сигнатуры в установленной версии.
+[S7] Effect v3 Effect: acquireRelease, interruption, and Effect fibers bound to a `Scope`. Verify the exact signatures in the installed version.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/src/Effect.ts
 ```
 
-[S8] Метаданные пакета в официальной ветке v3. Версия в Git не равна проверенному тегу дистрибутива npm.
+[S8] Package metadata on the official v3 branch. The version in Git is not equivalent to a verified npm distribution tag.
 
 ```text
 https://raw.githubusercontent.com/Effect-TS/effect/v3/packages/effect/package.json
 ```
 
-[S9] Официальное руководство по переходу с Effect v3 на v4.
+[S9] Official guide to migrating from Effect v3 to v4.
 
 ```text
 https://github.com/Effect-TS/effect/blob/main/MIGRATION.md
 ```
 
-## 24. Формат финального отчёта Codex
+## 24. Codex Final Report Format
 
-В завершение приложить:
+At completion, include:
 
 ```text
-1. Что реализовано и где находится публичный API.
-2. Точные версии Effect, TypeScript, Node и тестовых инструментов.
-3. Выполненные команды и фактические результаты.
-4. Какие из T01–T40 покрыты конкретными тестами.
-5. Какие изменения API внесены относительно исходной спецификации и почему.
-6. Известные ограничения/непроверенные сценарии.
-7. Как запустить пример `basic` и проверки пакета.
-8. Оценка готовности: экспериментальная версия 0.1 без необоснованных заявлений о готовности к промышленной эксплуатации.
+1. What has been implemented and where the public API is located.
+2. Exact versions of Effect, TypeScript, Node, and testing tools.
+3. Commands executed and actual results.
+4. Which of T01–T40 are covered by specific tests.
+5. What API changes were made relative to the original specification and why.
+6. Known limitations/untested scenarios.
+7. How to run the `basic` example and package checks.
+8. Readiness assessment: experimental version 0.1, without unsubstantiated claims of production readiness.
 ```
 
-Главный критерий успеха:
+The main success criterion:
 
-> Обычные Effect-реализации автоматически появляются и исчезают вслед за явными зависимостями, но никакая магия композиции не ломает владение ресурсами, отмену и порядок завершения.
+> Ordinary Effect implementations automatically appear and disappear in response to explicit dependencies, but no composition magic breaks resource ownership, cancellation, or shutdown order.

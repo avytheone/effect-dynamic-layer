@@ -1,63 +1,65 @@
-# ADR 0003: почему недостаточно `Reloadable`, `ScopedRef` или `LayerMap`
+# ADR 0003: Why `Reloadable`, `ScopedRef`, or `LayerMap` Alone Is Not Enough
 
-- Статус: принято
-- Дата: 2026-09-11
+**English** | [Русский](../ru/adr/0003-why-not-only-reloadable.md)
 
-## Контекст
+- Status: accepted
+- Date: 2026-09-11
 
-`DynamicRuntime` управляет графом сервисов, доступность которого меняется во время работы. Когда меняется поставщик сервиса, недостаточно заменить одну ссылку. Нужно найти всю затронутую ветвь зависимых сервисов, перестать принимать новые вызовы, остановить старые поколения в обратном топологическом порядке и только затем запустить новые поколения в прямом порядке.
+## Context
 
-Публикация нового поколения должна происходить атомарно относительно состояния контроллера. Уже допущенные вызовы при этом имеют собственный отслеживаемый срок жизни: освобождать используемый ими ресурс раньше завершения этих вызовов нельзя.
+`DynamicRuntime` manages a graph of services whose availability changes at runtime. When a service provider changes, replacing a single reference is not enough. The entire affected branch of dependent services must be found, new calls must stop being admitted, old generations must be stopped in reverse topological order, and only then may new generations start in forward order.
 
-В Effect есть близкие средства управления ресурсами, но каждое из них решает более узкую задачу.
+Publication of a new generation must be atomic with respect to controller state. Calls that have already been admitted have their own tracked lifetimes: a resource they use cannot be released until those calls have completed.
+
+Effect provides related resource-management facilities, but each solves a narrower problem.
 
 ### `Reloadable`
 
-В установленном `effect@4.0.0-rc.115` нет файла `src/Reloadable.ts`, а корневой модуль не экспортирует `Reloadable`. Поэтому старый API из Effect 3 нельзя использовать или описывать как доступный в этой версии. Прослойка совместимости не добавляется.
+The installed `effect@4.0.0-rc.115` has no `src/Reloadable.ts` file, and the root module does not export `Reloadable`. Therefore, the old API from Effect 3 cannot be used or described as available in this version. No compatibility layer is added.
 
 ### `ScopedRef`
 
-`ScopedRef.fromAcquire` владеет текущим ресурсом. При вызове `ScopedRef.set` новое значение создаётся в новом `Scope`, `Scope` предыдущего значения закрывается, а ссылка меняется под защитой семафора. Этого достаточно для корректной замены одного значения, которое владеет ресурсом.
+`ScopedRef.fromAcquire` owns the current resource. When `ScopedRef.set` is called, the new value is acquired in a new `Scope`, the previous value's `Scope` is closed, and the reference is changed under semaphore protection. This is sufficient for correctly replacing one resource-owning value.
 
-Но зависимый сервис, уже получивший старый объект через `ScopedRef.get`, продолжает хранить именно этот объект. Одна лишь смена ссылки:
+However, a dependent service that has already obtained the old object through `ScopedRef.get` continues to hold that exact object. Changing the reference alone:
 
-- не находит зависящие компоненты;
-- не запрещает новые управляемые вызовы на время перестройки;
-- не ждёт завершения уже допущенных вызовов;
-- не останавливает и не запускает узлы графа зависимостей в правильном порядке;
-- не публикует состояния узлов `Pending / Starting / Active / Stopping / Disabled / Failed` и состояния всего `DynamicRuntime`: `Running / Closing / Closed / CloseFailed`;
-- не различает идентификатор описания и идентификатор его конкретного поколения.
+- does not find dependent components;
+- does not prevent new managed calls while the graph is being rebuilt;
+- does not wait for already admitted calls to complete;
+- does not stop and start dependency-graph nodes in the correct order;
+- does not publish the node states `Pending / Starting / Active / Stopping / Disabled / Failed` or the states of the entire `DynamicRuntime`: `Running / Closing / Closed / CloseFailed`;
+- does not distinguish a descriptor identifier from the identifier of its specific generation.
 
 ### `LayerMap`
 
-`LayerMap.make(lookup, options?)` создаёт кэш по ключам поверх `RcMap`. Метод `contextEffect(key)` выдаёт привязанное к `Scope` право использования записи, `get(key)` возвращает `Layer` для такого права, а `invalidate(key)` удаляет запись из карты и позволяет следующему обращению создать новое значение.
+`LayerMap.make(lookup, options?)` creates a keyed cache on top of `RcMap`. The `contextEffect(key)` method yields a `Scope`-bound right to use an entry, `get(key)` returns a `Layer` for such a right, and `invalidate(key)` removes the entry from the map and allows the next access to create a new value.
 
-У версии rc.115 есть важная особенность: если параметр `idleTimeToLive` не задан, `RcMap` использует `Duration.zero`. Как только закрывается `Scope` последнего пользователя записи, ресурс немедленно освобождается, а запись удаляется. Поэтому два последовательных независимых вызова `Effect.scoped(layerMap.contextEffect(key))` не обязаны вернуть один и тот же объект. Кэш сохраняет значение, пока периоды использования перекрываются, либо когда явно задано ненулевое время хранения без пользователей. Если занятая запись признана недействительной, она исчезает из карты, но её прежний ресурс живёт до освобождения всех действующих прав использования.
+Version rc.115 has an important property: when `idleTimeToLive` is not specified, `RcMap` uses `Duration.zero`. As soon as the last user's `Scope` for an entry closes, the resource is released immediately and the entry is removed. Therefore, two sequential, independent calls to `Effect.scoped(layerMap.contextEffect(key))` are not guaranteed to return the same object. The cache retains the value while usage periods overlap, or when a nonzero retention time without users is explicitly specified. If an entry in use is invalidated, it disappears from the map, but its old resource remains alive until all active usage rights have been released.
 
-`LayerMap` служит полезным образцом владения ресурсами по ключу со счётчиком пользователей, но сам по себе не задаёт:
+`LayerMap` is a useful model for keyed, reference-counted resource ownership, but by itself it does not provide:
 
-- связи между зависимостями и вычисление всей затронутой ветви;
-- каскадную остановку зависимых сервисов;
-- остановку старого поколения перед запуском нового в топологическом порядке;
-- независимые условия запуска типа `boolean`;
-- проверку номера поколения перед публикацией результата;
-- выполнение `use` в окружении вызывающего кода с отдельными правилами допуска и отзыва;
-- одну последовательную модель состояния всего графа.
+- dependency relationships and computation of the entire affected branch;
+- cascading shutdown of dependent services;
+- stopping an old generation before starting a new one in topological order;
+- independent boolean startup conditions;
+- validation of the generation number before publishing a result;
+- execution of `use` in the calling code's environment with separate admission and revocation rules;
+- one sequential state model for the entire graph.
 
-## Решение
+## Decision
 
-Реализовать `DynamicRuntime` как отдельный контроллер изменяемого направленного ациклического графа с отдельным `Scope` для каждого поколения.
+Implement `DynamicRuntime` as a separate controller for a mutable directed acyclic graph, with a separate `Scope` for each generation.
 
-- Каждое поколение получает новые `Layer.MemoMap` и `Scope.Closeable`.
-- Исполнители принадлежат явно выбранным `Scope` и запускаются через общедоступные `Effect.forkIn` или `Effect.forkScoped` в соответствии со своим сроком жизни.
-- Контроллер последовательно обрабатывает только изменения состояния и решения о допуске. Переданная пользователем функция не выполняется в той же задаче Effect, что и контроллер.
-- Исполнитель, созданный для вызова `use`, сохраняет `Context` и `Context.Reference` вызывающего кода. Право пользоваться конкретным поколением и допуск вызова учитываются отдельно.
-- При завершении поколения закрываются в определённом порядке, а дефекты освобождения ресурсов остаются наблюдаемыми.
+- Each generation receives a new `Layer.MemoMap` and `Scope.Closeable`.
+- Workers belong to explicitly selected `Scope` instances and are started through the public `Effect.forkIn` or `Effect.forkScoped` APIs according to their lifetime.
+- The controller sequentially processes only state changes and admission decisions. A user-supplied function does not run in the same Effect task as the controller.
+- A worker created for a `use` call preserves the calling code's `Context` and `Context.Reference` values. The right to use a specific generation and the admission of the call are tracked separately.
+- When a generation ends, scopes close in a defined order, and resource-release defects remain observable.
 
-`ScopedRef` и `LayerMap` не используются как скрытая замена этой модели. Их идеи допустимо применять только там, где контракт совпадает буквально: для владения одним значением в `Scope` или для кэша по ключам со счётчиком пользователей.
+`ScopedRef` and `LayerMap` are not used as hidden substitutes for this model. Their ideas may be applied only where the contract matches literally: ownership of a single value within a `Scope`, or a keyed cache with a user count.
 
-## Последствия
+## Consequences
 
-Собственный контроллер сложнее одного вызова `ScopedRef.set` или `LayerMap.invalidate`. Взамен основные инварианты библиотеки становятся явными, а гонки можно проверять отдельно. Решение не зависит от отсутствующего в этой версии `Reloadable` и не приписывает `LayerMap` отсутствующие в его API гарантии перестройки графа.
+A dedicated controller is more complex than one call to `ScopedRef.set` or `LayerMap.invalidate`. In return, the library's central invariants become explicit and races can be verified independently. The decision does not depend on `Reloadable`, which is absent from this version, and does not attribute graph-rebuilding guarantees to `LayerMap` that its API does not provide.
 
-Граница применимости решения проверяется в `test/compatibility.test.ts`. Точные версии, сигнатуры и результаты проверок записаны в `docs/compatibility.md`.
+The boundary of this decision is verified in `test/compatibility.test.ts`. Exact versions, signatures, and verification results are recorded in `docs/compatibility.md`.

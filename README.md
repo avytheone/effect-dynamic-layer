@@ -1,24 +1,26 @@
 # effect-dynamic-layer
 
-**Подключайте, отключайте и заменяйте сервисы Effect без перезапуска приложения.**
+**English** | [Русский](docs/ru/README.md)
 
-Библиотека следит за зависимостями между сервисами: запускает их в нужном порядке, останавливает затронутую ветку и освобождает ресурсы. Реализации остаются обычными `Effect` и `Layer`.
+**Connect, disconnect, and replace Effect services without restarting your application.**
 
-> Проект экспериментальный. Пакет пока не опубликован в npm и не заявлен готовым к промышленному использованию. Проверенная версия Effect — **4.0.0-rc.115**.
+The library tracks dependencies between services: it starts them in the right order, stops the affected branch, and releases resources. Implementations remain ordinary `Effect` and `Layer` values.
 
-[Пример](#пример) · [Запуск локально](#запуск-локально) · [Документация](#документация) · [Планы](#планы)
+> This project is experimental. The package has not been published to npm and is not claimed to be production-ready. The verified Effect version is **4.0.0-rc.115**.
 
-## Зачем это нужно
+[Example](#example) · [Local setup](#local-setup) · [Documentation](#documentation) · [Roadmap](#roadmap)
 
-Допустим, сервис аналитики зависит от подключения к базе данных. Если подключение появится позже, аналитика должна его дождаться. Если его отключить — перестать принимать новые вызовы и завершить свою очистку **до** закрытия базы. Если заменить — запуститься с новым подключением, не перезапуская независимые части приложения.
+## Why use it?
 
-`DynamicRuntime` берёт эту координацию на себя. Вы описываете сервисы и их зависимости, а библиотека управляет их жизненным циклом.
+Suppose an analytics service depends on a database connection. If the connection arrives later, analytics should wait for it. If it is disabled, analytics should stop accepting new calls and finish its cleanup **before** the database closes. If the connection is replaced, analytics should start with the new connection without restarting unrelated parts of the application.
 
-Она пригодится там, где состав приложения меняется во время работы: подключаются инструменты агента, меняются обработчики сообщений или включаются отдельные интеграции. Это не загрузчик плагинов и не транспорт — библиотека отвечает за зависимости и владение ресурсами.
+`DynamicRuntime` handles this coordination. You describe services and their dependencies; the library manages their lifecycle.
 
-## Пример
+It is useful when the composition of an application changes at runtime: agent tools are connected, message handlers are replaced, or individual integrations are enabled. It is not a plugin loader or a transport: its responsibility is dependencies and resource ownership.
 
-Зарегистрируем аналитику раньше базы. Она запустится, когда база станет доступна. Затем отключим базу: библиотека сначала остановит зависимую аналитику.
+## Example
+
+Register analytics before the database. It starts when the database becomes available. Then disable the database: the library stops the dependent analytics service first.
 
 ```ts
 import { Context, Effect } from "effect";
@@ -48,7 +50,7 @@ const program = Effect.scoped(
         requires: Requirement.service(Database),
         acquire: Effect.gen(function* () {
           const database = yield* Database;
-          return { read: Effect.succeed(`Источник: ${database.label}`) };
+          return { read: Effect.succeed(`Source: ${database.label}`) };
         }),
       }),
     );
@@ -57,7 +59,7 @@ const program = Effect.scoped(
       DynamicLayer.fromEffect(Database)({
         id: "database",
         requires: Requirement.empty,
-        acquire: Effect.succeed({ label: "основная база" }),
+        acquire: Effect.succeed({ label: "primary database" }),
       }),
     );
 
@@ -73,58 +75,58 @@ const program = Effect.scoped(
 await Effect.runPromise(program);
 ```
 
-В примере база — простой объект. Для настоящего подключения используйте `Effect.acquireRelease` или готовый `Layer` через `DynamicLayer.fromLayer`: освобождение ресурсов будет частью того же жизненного цикла.
+The database in this example is a simple object. For a real connection, use `Effect.acquireRelease` or an existing `Layer` through `DynamicLayer.fromLayer`: resource release becomes part of the same lifecycle.
 
-- `requires` перечисляет обязательные зависимости. Несколько зависимостей объединяются через `Requirement.all(...)`.
-- Сервис выбирается по его тегу — например, `Database`, а не по строке `"database"`. Поле `id` нужно для диагностики.
-- `runtime.use` даёт доступ к текущему работающему экземпляру на время вызова.
-- Закрытие внешнего `Effect.scoped` автоматически завершает работу `DynamicRuntime` и освобождает его ресурсы.
+- `requires` lists required dependencies. Combine several dependencies with `Requirement.all(...)`.
+- A service is addressed by its tag, such as `Database`, not the string `"database"`. The `id` field is for diagnostics.
+- `runtime.use` provides access to the currently active instance for the duration of the call.
+- Closing the outer `Effect.scoped` automatically shuts down `DynamicRuntime` and releases its resources.
 
-## Что гарантирует библиотека
+## What the library guarantees
 
-- **Запуск по готовности.** Сервис не запускается, пока не доступны все его обязательные зависимости. Отсутствующая зависимость — состояние ожидания, а не ошибка регистрации.
-- **Правильный порядок остановки.** Сначала завершаются зависимые сервисы и их очистка, затем освобождаются ресурсы, которыми они пользовались.
-- **Защита от устаревших экземпляров.** После подтверждённого отключения или замены новые вызовы не получают старый экземпляр. Уже выполняющиеся вызовы через `use` прерываются; освобождение ресурса ждёт их завершения и очистки.
-- **Изменения только нужной ветки.** Независимые сервисы не перезапускаются.
-- **Явное восстановление после ошибки.** Неудачный запуск не повторяется бесконечно. `retry` разрешает новую попытку; изменение нужной зависимости или замена описания также могут её разрешить.
-- **Проверка зависимостей.** Циклы и повторная регистрация одного ключа сервиса отклоняются до изменения работающего графа. Типы помогают проверить, что описание перечисляет требования реализации.
+- **Start when ready.** A service does not start until all required dependencies are available. A missing dependency means waiting, not a registration error.
+- **Correct shutdown order.** Dependent services and their cleanup finish before the resources they use are released.
+- **Protection against stale instances.** Once disabling or replacing a service is acknowledged, new calls cannot obtain the old instance. Calls already running through `use` are interrupted; resource release waits for them to finish, including cleanup.
+- **Changes stay within the affected branch.** Unrelated services are not restarted.
+- **Explicit recovery after failure.** A failed start is not retried indefinitely. `retry` allows another attempt; a change to a required dependency or replacement of the descriptor can also allow one.
+- **Dependency validation.** Cycles and duplicate registration of a service key are rejected before the running graph changes. Types help verify that a descriptor lists its implementation's requirements.
 
-При замене сначала останавливается старый экземпляр, затем запускается новый. Между ними есть период недоступности — бесшовное переключение библиотека не обещает.
+Replacement stops the old instance before starting the new one. There is a period of unavailability between them; the library does not promise a seamless switchover.
 
-## Управление сервисами
+## Managing services
 
-| Операция | Назначение |
+| Operation | Purpose |
 |---|---|
-| `register(description)` | Зарегистрировать описание сервиса |
-| `enable(Service)` / `disable(Service)` | Разрешить или запретить его работу |
-| `replace(Service, description)` | Заменить описание, сохранив `id` и ключ сервиса |
-| `unregister(Service)` | Отозвать сервис и удалить его регистрацию после очистки |
-| `retry(Service)` | Разрешить новую попытку после ошибки запуска |
-| `use(Service, callback)` | Выполнить операцию с работающим экземпляром |
-| `awaitState(Service, state)` | Дождаться состояния из `LifecycleState` |
-| `awaitIdle()` | Дождаться завершения текущих изменений и управляемых вызовов |
-| `shutdown` | Завершить работу всего `DynamicRuntime` |
+| `register(description)` | Register a service descriptor |
+| `enable(Service)` / `disable(Service)` | Allow or prevent the service from running |
+| `replace(Service, description)` | Replace the descriptor while preserving its `id` and service key |
+| `unregister(Service)` | Revoke the service and remove its registration after cleanup |
+| `retry(Service)` | Allow another attempt after a startup failure |
+| `use(Service, callback)` | Run an operation with the active instance |
+| `awaitState(Service, state)` | Wait for a state from `LifecycleState` |
+| `awaitIdle()` | Wait for current transitions and managed calls to finish |
+| `shutdown` | Shut down the entire `DynamicRuntime` |
 
-**Подтверждение команды не означает, что запуск или очистка уже закончились.** Для этого используйте `awaitState` или `awaitIdle`. Эти ожидания можно отменить средствами Effect.
+**Acknowledging a command does not mean startup or cleanup has finished.** Use `awaitState` or `awaitIdle` to wait for completion. These waits can be cancelled through Effect.
 
-Состояния сервисов доступны через `snapshot` и поток `changes`: ожидание (`Pending`), запуск (`Starting`), работа (`Active`), остановка (`Stopping`), отключение (`Disabled`) и ошибка (`Failed`).
+Service states are available through `snapshot` and the `changes` stream: waiting (`Pending`), starting (`Starting`), running (`Active`), stopping (`Stopping`), disabled (`Disabled`), and failed (`Failed`).
 
-Для внешнего условия запуска есть поле `when: SubscriptionRef<boolean>`. Значение `false` останавливает сервис, `true` разрешает запуск при готовых зависимостях. Библиотека сама не обнаруживает сетевые отказы и не восстанавливает соединения — это задача адаптера или самого сервиса.
+Use `when: SubscriptionRef<boolean>` for an external startup condition. `false` stops the service; `true` allows it to start once dependencies are ready. The library does not detect network failures or reconnect by itself: that is the responsibility of an adapter or the service.
 
-## Важные ограничения
+## Important limitations
 
-- **Не выносите экземпляр сервиса за пределы `use`.** Не сохраняйте его для будущих вызовов и не запускайте с ним неучтённые фоновые операции. TypeScript не может запретить это автоматически.
-- **Прерывание не отменяет уже совершённое внешнее действие.** Библиотека не повторяет бизнес-операции на новом экземпляре. Таймаут запроса не доказывает, что сервер его не выполнил.
-- **Завершение ждёт освобождения ресурсов.** `shutdown` нельзя оборвать посередине очистки. Неотменяемая операция или зависший обработчик освобождения могут задержать завершение; таймаут не разрешает закрыть ресурс под работающим сервисом.
-- **Ошибка освобождения требует внимания.** Она остаётся в диагностике и запрещает автоматический перезапуск. Подробности, включая неоднозначные ошибки частичного запуска, описаны в [правилах работы](docs/semantics.md).
-- **Один ключ сервиса — одна регистрация в `DynamicRuntime`.** Несколько поставщиков одного сервиса, необязательные зависимости, автоматическое переключение на резервный сервис и загрузка кода на лету не поддерживаются.
-- **Совместимость проверена на Bun и указанной версии Effect.** Сборка ESM сама по себе не доказывает работу в браузере или других средах.
+- **Do not let a service instance escape `use`.** Do not retain it for future calls or start untracked background operations with it. TypeScript cannot enforce this automatically.
+- **Interruption does not undo an external action that has already happened.** The library does not replay business operations on a new instance. A request timeout does not prove that the server did not execute the request.
+- **Shutdown waits for resource release.** `shutdown` cannot be interrupted halfway through cleanup. An uninterruptible operation or a stuck finalizer can delay completion; a timeout does not permit closing a resource underneath a running service.
+- **Release failures need attention.** They remain in diagnostics and prevent automatic restart. See the [lifecycle semantics](docs/semantics.md) for details, including ambiguous failures during partial startup.
+- **One service key means one registration in a `DynamicRuntime`.** Multiple providers for the same service, optional dependencies, automatic failover, and dynamic code loading are not supported.
+- **Compatibility has been verified on Bun and the specified Effect version.** An ESM build alone does not prove that the library works in browsers or other environments.
 
-Снимок состояния может содержать исходную ошибку с чувствительными данными. Не отправляйте его целиком в публичные журналы; используйте подготовленное краткое описание ошибки.
+A snapshot can contain an original error with sensitive data. Do not send the entire snapshot to public logs; use a sanitized error summary instead.
 
-## Запуск локально
+## Local setup
 
-Нужен **Bun 1.4.2**. Поскольку пакет ещё не опубликован, начните с примеров в репозитории:
+You need **Bun 1.4.2**. Since the package has not been published, start with the repository examples:
 
 ```sh
 git clone https://github.com/avytheone/effect-dynamic-layer.git
@@ -133,14 +135,14 @@ bun install --frozen-lockfile
 bun run example:basic
 ```
 
-Другие примеры:
+Other examples:
 
 ```sh
 bun run example:effect-factory
 bun run example:failure-and-retry
 ```
 
-Проверки и сборка:
+Checks and build:
 
 ```sh
 bun test
@@ -151,31 +153,33 @@ bun run build
 bun run test:package
 ```
 
-Последняя команда проверяет собранный пакет в отдельном приложении: установку, публичные типы и выполнение операций с сервисами. Effect не включается в сборку библиотеки и остаётся зависимостью приложения.
+The last command checks the built package in a separate application: installation, public types, and service operations. Effect is not bundled with the library and remains a dependency provided by the application.
 
-Bun устанавливает зависимости, выполняет тесты и собирает JavaScript. TypeScript проверяет типы и выпускает файлы объявлений. Biome проверяет стиль кода; Lefthook запускает проверки перед коммитом и отправкой изменений.
+Bun installs dependencies, runs tests, and builds JavaScript. TypeScript checks types and emits declaration files. Biome checks code style; Lefthook runs checks before commits and pushes.
 
-## Документация
+## Documentation
 
-| Документ | Что внутри |
+English is the official project language. Russian translations are maintained in [docs/ru](docs/ru/README.md). Contribution and maintenance rules are in [AGENTS.md](AGENTS.md).
+
+| Document | Contents |
 |---|---|
-| [Правила работы](docs/semantics.md) | Состояния, команды, ожидания, отмена и освобождение ресурсов |
-| [Устройство библиотеки](docs/architecture.md) | Граф зависимостей, экземпляры сервисов и владение ресурсами |
-| [Результаты проверок](docs/status.md) | Выполненные сценарии, версии инструментов и ограничения |
-| [Совместимость с Effect](docs/compatibility.md) | Проверенные возможности используемой версии Effect |
-| [План развития](docs/roadmap.md) | Семь прикладных сценариев и критерии их готовности |
-| [История изменений](CHANGELOG.md) | Изменения библиотеки |
+| [Lifecycle semantics](docs/semantics.md) | States, commands, waits, cancellation, and resource release |
+| [Architecture](docs/architecture.md) | Dependency graph, service instances, and resource ownership |
+| [Verification status](docs/status.md) | Executed scenarios, tool versions, and limitations |
+| [Effect compatibility](docs/compatibility.md) | Verified capabilities of the selected Effect version |
+| [Roadmap](docs/roadmap.md) | Seven application scenarios and their acceptance criteria |
+| [Changelog](CHANGELOG.md) | Changes to the library |
 
-## Планы
+## Roadmap
 
-Следующий шаг — проверить библиотеку в реальных приложениях:
+The next step is to exercise the library in real applications:
 
-1. Перенести интерфейс с независимо подключаемыми частями с Cordis, сохранив его поведение.
-2. Собрать среду для агента с подключаемыми инструментами и MCP-соединениями.
-3. Реализовать обработчики сообщений NATS, которые можно менять во время работы.
-4. Проверить смену конфигурации и учётных данных внешних интеграций.
-5. Проверить независимые сессии и окружения клиентов с общими ресурсами.
-6. Реализовать обратимые регистрации команд, инструментов, маршрутов и других расширений.
-7. Проверить работу с устройствами и потоками данных в локальном приложении.
+1. Migrate a UI with independently attachable parts from Cordis while preserving its behavior.
+2. Build an agent runtime with attachable tools and MCP connections.
+3. Implement NATS message handlers that can be replaced at runtime.
+4. Exercise configuration and credential changes for external integrations.
+5. Exercise independent sessions and tenant environments with shared resources.
+6. Implement reversible registrations for commands, tools, routes, and other extensions.
+7. Exercise devices and data streams in a local application.
 
-Это **план**, а не список готовых интеграций. Порядок реализации и условия приёмки каждого сценария сохранены в [плане развития](docs/roadmap.md).
+This is a **plan**, not a list of completed integrations. The implementation order and acceptance criteria for every scenario are preserved in the [roadmap](docs/roadmap.md).
